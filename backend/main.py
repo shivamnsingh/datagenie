@@ -6,7 +6,7 @@ Entry point. Mounts all routers.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import ingest, clean, export
+from routers import ingest, clean, export, sql, rag  # ← add sql, rag
 
 app = FastAPI(
     title="DataGenie AI",
@@ -27,6 +27,8 @@ app.add_middleware(
 app.include_router(ingest.router,  prefix="/api/ingest",  tags=["Ingest"])
 app.include_router(clean.router,   prefix="/api/clean",   tags=["Clean"])
 app.include_router(export.router,  prefix="/api/export",  tags=["Export"])
+app.include_router(sql.router,     prefix="/api/sql",     tags=["SQL"])    # ← add
+app.include_router(rag.router,     prefix="/api/rag",     tags=["RAG"])    # ← add
 
 
 @app.get("/health")
