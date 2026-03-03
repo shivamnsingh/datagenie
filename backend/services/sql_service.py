@@ -5,15 +5,12 @@ The Text-to-SQL brain.
 
 Flow:
   1. Build a schema context string from registered tables
-  2. Call Claude API with the schema + user question
-  3. Parse the SQL from Claude's response
+  2. Call Groq API (free) with the schema + user question
+  3. Parse the SQL from the response
   4. Validate it with sql_validator.py
   5. Execute via DuckDB
   6. Auto-suggest the best visualization for the result
   7. Return QueryResult
-
-Claude is prompted with strict rules — never hallucinate columns,
-always show only what's in the schema, ask for clarification if ambiguous.
 """
 
 from __future__ import annotations
@@ -43,10 +40,6 @@ from utils.duck_session import DuckSession
 # ══════════════════════════════════════════════════════════════════
 
 def build_schema_context(tables: Dict[str, TableInfo]) -> str:
-    """
-    Build a compact schema string to inject into the Claude prompt.
-    Format keeps token count low while giving Claude everything it needs.
-    """
     lines = ["Available SQL tables (DuckDB syntax):"]
     for tname, info in tables.items():
         col_defs = ", ".join(
@@ -57,7 +50,6 @@ def build_schema_context(tables: Dict[str, TableInfo]) -> str:
     if len(tables) > 1:
         lines.append("")
         lines.append("Possible JOIN relationships (inferred from column names):")
-        # Simple heuristic: find shared column names across tables
         from collections import defaultdict
         col_to_tables: Dict[str, List[str]] = defaultdict(list)
         for tname, info in tables.items():
@@ -71,7 +63,7 @@ def build_schema_context(tables: Dict[str, TableInfo]) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# CLAUDE PROMPT
+# PROMPT BUILDER
 # ══════════════════════════════════════════════════════════════════
 
 def _build_system_prompt(schema_context: str) -> str:
@@ -102,15 +94,8 @@ RESPONSE FORMAT — always respond with valid JSON in this exact structure:
 No markdown, no code fences, just raw JSON."""
 
 
-def _parse_claude_response(content: str) -> Tuple[str, str, str]:
-    """
-    Parse Claude's JSON response.
-    Returns (sql, explanation, clarification_needed).
-    Falls back gracefully if JSON is malformed.
-    """
-    # Strip markdown fences if present despite instructions
+def _parse_llm_response(content: str) -> Tuple[str, str, str]:
     content = re.sub(r"```(?:json)?", "", content).strip().rstrip("```").strip()
-
     try:
         data = json.loads(content)
         sql = data.get("sql", "").strip()
@@ -118,7 +103,6 @@ def _parse_claude_response(content: str) -> Tuple[str, str, str]:
         clarification = data.get("clarification_needed", "").strip()
         return sql, explanation, clarification
     except json.JSONDecodeError:
-        # Last resort: try to extract SQL block
         sql_match = re.search(r"SELECT.*?;", content, re.IGNORECASE | re.DOTALL)
         sql = sql_match.group(0) if sql_match else ""
         return sql, "Could not parse full explanation.", ""
@@ -129,30 +113,16 @@ def _parse_claude_response(content: str) -> Tuple[str, str, str]:
 # ══════════════════════════════════════════════════════════════════
 
 def _suggest_viz(df: pd.DataFrame, sql: str) -> Optional[VizSuggestion]:
-    """
-    Heuristically decide the best chart type for a query result.
-    Rules priority:
-      1. Time column + numeric → line chart
-      2. 1 string col + 1 numeric + few rows → bar chart
-      3. 1 string col + 1 numeric with % or proportion → pie chart
-      4. 2 numeric cols → scatter
-      5. Single numeric column → histogram
-      6. Many columns → table
-    """
     if df.empty or len(df.columns) == 0:
         return None
 
     cols = list(df.columns)
-    dtypes = {c: str(df[c].dtype) for c in cols}
-
     numeric_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
     string_cols = [c for c in cols if pd.api.types.is_object_dtype(df[c]) or str(df[c].dtype) == "category"]
     date_cols = [c for c in cols if pd.api.types.is_datetime64_any_dtype(df[c])
                  or any(kw in c.lower() for kw in ("date", "month", "year", "week", "time"))]
-
     row_count = len(df)
 
-    # 1. Time series
     if date_cols and numeric_cols:
         return VizSuggestion(
             chart_type="line",
@@ -162,9 +132,7 @@ def _suggest_viz(df: pd.DataFrame, sql: str) -> Optional[VizSuggestion]:
             reason="Detected a date/time column with a numeric measure — line chart shows trend.",
         )
 
-    # 2. Bar chart (categorical + numeric, reasonable rows)
     if string_cols and numeric_cols and row_count <= 30:
-        # Check if it looks like a proportion/percentage for pie
         y_col = numeric_cols[0]
         total = df[y_col].sum()
         if total > 0 and row_count <= 8:
@@ -183,7 +151,6 @@ def _suggest_viz(df: pd.DataFrame, sql: str) -> Optional[VizSuggestion]:
             reason="Categorical X-axis with numeric metric — bar chart is ideal.",
         )
 
-    # 3. Scatter (2 numeric)
     if len(numeric_cols) >= 2:
         return VizSuggestion(
             chart_type="scatter",
@@ -193,7 +160,6 @@ def _suggest_viz(df: pd.DataFrame, sql: str) -> Optional[VizSuggestion]:
             reason="Two numeric columns — scatter reveals correlation.",
         )
 
-    # 4. Histogram (single numeric)
     if len(numeric_cols) == 1:
         return VizSuggestion(
             chart_type="histogram",
@@ -203,7 +169,6 @@ def _suggest_viz(df: pd.DataFrame, sql: str) -> Optional[VizSuggestion]:
             reason="Single numeric column — histogram shows distribution.",
         )
 
-    # 5. Fallback: table
     return VizSuggestion(
         chart_type="table",
         title="Query Results",
@@ -212,59 +177,65 @@ def _suggest_viz(df: pd.DataFrame, sql: str) -> Optional[VizSuggestion]:
 
 
 # ══════════════════════════════════════════════════════════════════
-# MAIN SERVICE
+# GROQ API CONFIG  (replaces Anthropic)
 # ══════════════════════════════════════════════════════════════════
 
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL   = "llama-3.3-70b-versatile"   # free, fast, great at SQL
 
+
+# ══════════════════════════════════════════════════════════════════
+# MAIN SERVICE
+# ══════════════════════════════════════════════════════════════════
 
 async def nl_to_sql_and_execute(
     question: str,
     session: DuckSession,
     max_rows: int = 500,
-    api_key: str = "",
+    api_key: str = "",          # now expects GROQ_API_KEY
 ) -> QueryResult:
     """
     Full pipeline: natural language → SQL → validate → execute → visualize.
+    Uses Groq (free tier) instead of Anthropic.
     """
     schema_ctx = build_schema_context(session.tables)
     system_prompt = _build_system_prompt(schema_ctx)
     t_start = time.perf_counter()
 
-    # ── Step 1: Call Claude API ──────────────────────────────────
+    # ── Step 1: Call Groq API ────────────────────────────────────
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                ANTHROPIC_API_URL,
+                GROQ_API_URL,
                 headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
                 },
                 json={
-                    "model": CLAUDE_MODEL,
+                    "model": GROQ_MODEL,
                     "max_tokens": 1024,
-                    "system": system_prompt,
-                    "messages": [{"role": "user", "content": question}],
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user",   "content": question},
+                    ],
                 },
             )
             resp.raise_for_status()
             data = resp.json()
-            raw_content = data["content"][0]["text"]
+            raw_content = data["choices"][0]["message"]["content"]
     except httpx.HTTPStatusError as e:
-        return _error_result(question, "", f"Claude API error {e.response.status_code}: {e.response.text}")
+        return _error_result(question, "", f"Groq API error {e.response.status_code}: {e.response.text}")
     except Exception as e:
-        return _error_result(question, "", f"Failed to reach Claude API: {e}")
+        return _error_result(question, "", f"Failed to reach Groq API: {e}")
 
     # ── Step 2: Parse response ───────────────────────────────────
-    sql, explanation, clarification = _parse_claude_response(raw_content)
+    sql, explanation, clarification = _parse_llm_response(raw_content)
 
     if clarification:
         return _error_result(question, sql, f"Clarification needed: {clarification}")
 
     if not sql:
-        return _error_result(question, sql, "Claude did not return a SQL query. Please rephrase your question.")
+        return _error_result(question, sql, "No SQL query returned. Please rephrase your question.")
 
     # ── Step 3: Validate ─────────────────────────────────────────
     validation = validate_sql(sql, session.tables)
@@ -281,15 +252,11 @@ async def nl_to_sql_and_execute(
         return _error_result(question, sql, f"SQL execution failed: {e}")
 
     elapsed_ms = (time.perf_counter() - t_start) * 1000
-
     truncated = len(result_df) > max_rows
     if truncated:
         result_df = result_df.head(max_rows)
 
-    # Clean NaN → None for JSON serialisation
     result_df = result_df.where(pd.notnull(result_df), None)
-
-    # ── Step 5: Suggest visualization ───────────────────────────
     viz = _suggest_viz(result_df, sql)
 
     columns = [
@@ -321,10 +288,7 @@ async def execute_raw_sql(
     session: DuckSession,
     max_rows: int = 500,
 ) -> QueryResult:
-    """
-    Execute a raw SQL query directly (no LLM translation).
-    Used by the SQL editor in the frontend.
-    """
+    """Execute raw SQL directly — no LLM needed."""
     t_start = time.perf_counter()
 
     validation = validate_sql(sql, session.tables)
@@ -365,7 +329,6 @@ async def execute_raw_sql(
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _error_result(question: str, sql: str, error: str) -> QueryResult:
-    from utils.duck_session import DuckSession
     return QueryResult(
         session_id="",
         question=question,

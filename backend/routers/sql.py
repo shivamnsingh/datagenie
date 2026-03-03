@@ -46,10 +46,10 @@ def create_session(req: RegisterTablesRequest):
 
     Example request:
     {
-      "tables": [
+    "tables": [
         {"file_id": "uuid-1", "table_name": "sales"},
         {"file_id": "uuid-2", "table_name": "employees"}
-      ]
+    ]
     }
     """
     session = duck_store.create()
@@ -61,7 +61,7 @@ def create_session(req: RegisterTablesRequest):
             raise HTTPException(
                 status_code=404,
                 detail=f"File ID '{t.file_id}' not found. "
-                       "Upload and clean the file first before creating a SQL session.",
+                    "Upload and clean the file first before creating a SQL session.",
             )
         session.register(t.table_name, df, t.file_id)
 
@@ -89,7 +89,7 @@ async def nl_query(
     """
     Translate a natural language question to SQL, execute it, and return results.
 
-    Pass your Anthropic API key as the 'x-api-key' header.
+    Pass your GROQ   API key as the 'x-api-key' header.
     In production, load it from environment variables instead.
     """
     session = duck_store.get(req.session_id)
@@ -97,12 +97,12 @@ async def nl_query(
         raise HTTPException(status_code=404, detail=f"Session '{req.session_id}' not found.")
 
     # Resolve API key: header > environment variable
-    api_key = x_api_key or os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = x_api_key or os.getenv("GROQ_API_KEY", "")
     if not api_key:
         raise HTTPException(
             status_code=401,
-            detail="Anthropic API key required. Pass it as 'x-api-key' header "
-                   "or set ANTHROPIC_API_KEY environment variable.",
+            detail="GROQ API key required. Pass it as 'x-api-key' header "
+                "or set GROQ_API_KEY environment variable.",
         )
 
     result = await nl_to_sql_and_execute(
