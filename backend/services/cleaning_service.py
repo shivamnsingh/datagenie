@@ -66,11 +66,8 @@ def _quality_score(df: pd.DataFrame) -> float:
 
 
 def _iqr_bounds(series: pd.Series) -> Tuple[float, float]:
-    s = pd.to_numeric(series, errors="coerce").dropna()
-    if len(s) == 0:
-        return 0.0, 0.0
-    q1 = float(s.quantile(0.25))
-    q3 = float(s.quantile(0.75))
+    q1 = series.quantile(0.25)
+    q3 = series.quantile(0.75)
     iqr = q3 - q1
     return q1 - 1.5 * iqr, q3 + 1.5 * iqr
 
@@ -107,14 +104,18 @@ def _apply_null(df: pd.DataFrame, cfg: NullConfig) -> Tuple[pd.DataFrame, Cleani
         action = "dropped column"
 
     elif cfg.strategy == "fill_mean":
-        val = df[col].mean()
-        df[col] = df[col].fillna(round(val, 4))
+    # ✅ Add this: convert to numeric first
+        numeric_col = pd.to_numeric(df[col], errors="coerce")
+        val = numeric_col.mean()
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(round(val, 4))
         affected = before_nulls
         action = f"filled with mean ({round(val, 4)})"
 
     elif cfg.strategy == "fill_median":
-        val = df[col].median()
-        df[col] = df[col].fillna(round(val, 4))
+        # ✅ Add this: convert to numeric first
+        numeric_col = pd.to_numeric(df[col], errors="coerce")
+        val = numeric_col.median()
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(round(val, 4))
         affected = before_nulls
         action = f"filled with median ({round(val, 4)})"
 

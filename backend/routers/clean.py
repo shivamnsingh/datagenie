@@ -37,15 +37,13 @@ def cleaning_preview(config: CleaningConfig):
 
 @router.post("/apply", response_model=CleaningResult)
 def cleaning_apply(config: CleaningConfig):
-    """
-    Apply the cleaning config to the dataset.
-    Returns the new clean_file_id and full audit log.
-    """
     try:
         return apply_cleaning(config)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        import traceback
+        traceback.print_exc()   # ← add this line
         raise HTTPException(status_code=500, detail=f"Cleaning failed: {e}")
 
 
