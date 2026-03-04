@@ -28,10 +28,9 @@ def _is_pk_candidate(col: str, series: pd.Series) -> bool:
 
 
 def _detect_datetime(series: pd.Series) -> bool:
-    """Try parsing a sample as datetime."""
     sample = series.dropna().head(50).astype(str)
     try:
-        pd.to_datetime(sample, infer_datetime_format=True, errors="raise")
+        pd.to_datetime(sample, errors="raise")
         return True
     except Exception:
         return False

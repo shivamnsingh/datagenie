@@ -31,6 +31,8 @@ class BuildIndexResponse(BaseModel):
     chunks_indexed: int
     tables_indexed: List[str]
     status: str
+    # column names per table — used by frontend to generate smart starter questions
+    table_schemas: Dict[str, List[str]] = Field(default_factory=dict)
 
 
 # ══════════════════════════════════════════════════════════════════

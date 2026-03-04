@@ -66,8 +66,11 @@ def _quality_score(df: pd.DataFrame) -> float:
 
 
 def _iqr_bounds(series: pd.Series) -> Tuple[float, float]:
-    q1 = series.quantile(0.25)
-    q3 = series.quantile(0.75)
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if len(s) == 0:
+        return 0.0, 0.0
+    q1 = float(s.quantile(0.25))
+    q3 = float(s.quantile(0.75))
     iqr = q3 - q1
     return q1 - 1.5 * iqr, q3 + 1.5 * iqr
 

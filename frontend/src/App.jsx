@@ -86,7 +86,7 @@ export default function App() {
                 type={showApiKey ? "text" : "password"}
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
-                placeholder="sk-ant-… API key"
+                placeholder="gsk_… Groq API key"
                 className="w-44 bg-gray-900 border border-gray-700 focus:border-cyan-700 rounded-lg px-3 py-1.5 text-xs font-mono text-gray-300 outline-none transition-colors"
               />
               <button

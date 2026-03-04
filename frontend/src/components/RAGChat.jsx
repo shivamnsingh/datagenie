@@ -9,8 +9,7 @@
 //   apiKey        — Anthropic API key string
 
 import { useState, useRef, useEffect } from "react";
-import { buildIndex } from "../services/ragApi";
-import { ragChat } from "../services/ragApi";
+import { buildIndex, ragChat } from "../services/ragApi";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -22,14 +21,47 @@ const INSIGHT_CONFIG = {
   clarification: { label: "Clarification",    color: "gray",   icon: "❓" },
 };
 
-const STARTER_QUESTIONS = [
-  "What are the key trends in this dataset?",
-  "Which factors most influence sales performance?",
-  "Are there any anomalies or outliers I should know about?",
-  "What does the regional performance look like?",
-  "Which time periods show the strongest growth?",
-  "What recommendations would you make based on this data?",
+const FALLBACK_QUESTIONS = [
+  "Show me a summary of this dataset",
+  "What are the most common values?",
+  "Are there any anomalies or outliers?",
+  "What patterns exist in this data?",
+  "How many unique values are in each column?",
+  "What does a typical row look like?",
 ];
+
+// Generate smart starter questions from actual column names via Groq API
+async function generateStarterQuestions(tableSchemas, apiKey) {
+  if (!apiKey) return FALLBACK_QUESTIONS;
+
+  const schemaText = Object.entries(tableSchemas)
+    .map(([table, cols]) => `Table "${table}" has columns: ${cols.join(", ")}`)
+    .join("\n");
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        max_tokens: 300,
+        messages: [{
+          role: "user",
+          content: `Given this dataset schema:\n${schemaText}\n\nGenerate exactly 6 short, specific, useful questions a data analyst would ask about this data. Return only a JSON array of 6 strings, no explanation, no markdown.`,
+        }],
+      }),
+    });
+    const data = await res.json();
+    const text = data.choices[0].message.content.replace(/```json|```/g, "").trim();
+    const questions = JSON.parse(text);
+    return Array.isArray(questions) ? questions.slice(0, 6) : FALLBACK_QUESTIONS;
+  } catch {
+    return FALLBACK_QUESTIONS;
+  }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -180,11 +212,15 @@ function Message({ msg, onFollowUp }) {
             <Badge color={insight.color}>{insight.label}</Badge>
           </div>
 
-          {/* Answer text - render line breaks */}
-          <div className="text-gray-200 text-sm leading-relaxed space-y-2">
-            {response.answer.split("\n").map((line, i) => (
-              <p key={i}>{line}</p>
-            ))}
+          {/* Answer text - render line breaks and bullets */}
+          <div className="text-gray-200 text-sm leading-relaxed space-y-1">
+            {response.answer.split("\n").filter(l => l.trim()).map((line, i) => {
+              const isBullet = line.trim().startsWith("*") || line.trim().startsWith("+") || line.trim().startsWith("-");
+              const text = line.replace(/^\s*[\*\+\-]\s*/, "").replace(/\*\*(.*?)\*\*/g, "$1");
+              return isBullet
+                ? <div key={i} className="flex gap-2 ml-2"><span className="text-cyan-500 mt-0.5">•</span><span>{text}</span></div>
+                : <p key={i}>{text}</p>;
+            })}
           </div>
 
           {/* Suggested SQL */}
@@ -312,6 +348,7 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [starterQuestions, setStarterQuestions] = useState(FALLBACK_QUESTIONS);
   // Maintain conversation history in Claude API format
   const [history, setHistory] = useState([]);
   const bottomRef = useRef(null);
@@ -320,9 +357,17 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleIndexReady = (result) => {
+  const handleIndexReady = async (result) => {
     setRagSessionId(result.rag_session_id);
     setIndexInfo(result);
+
+    // Generate dataset-specific questions from actual column names
+    const questions = await generateStarterQuestions(
+      result.table_schemas || {},
+      apiKey
+    );
+    setStarterQuestions(questions);
+
     setMessages([{
       role: "ai",
       response: {
@@ -330,7 +375,7 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
         insight_type: "descriptive",
         source_chunks: [],
         suggested_sql: null,
-        follow_up_questions: STARTER_QUESTIONS.slice(0, 3),
+        follow_up_questions: questions.slice(0, 3),
       },
     }]);
   };
@@ -346,17 +391,25 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
     try {
       const response = await ragChat(ragSessionId, q, history, apiKey);
 
-      // Update conversation history for Claude
+      // If answer looks like raw JSON, parse it client-side
+      let finalResponse = response;
+      if (response.answer && response.answer.trim().startsWith("{")) {
+        try {
+          const parsed = JSON.parse(response.answer);
+          if (parsed.answer) finalResponse = { ...response, ...parsed };
+        } catch {}
+      }
+
       const newHistory = [
         ...history,
         { role: "user", content: q },
-        { role: "assistant", content: response.answer },
-      ].slice(-12); // keep last 6 turns
+        { role: "assistant", content: finalResponse.answer },
+      ].slice(-12);
       setHistory(newHistory);
 
       setMessages(m => [
         ...m.filter(msg => msg.role !== "loading"),
-        { role: "ai", response },
+        { role: "ai", response: finalResponse },
       ]);
     } catch (e) {
       setMessages(m => [
@@ -407,7 +460,7 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
       {/* Starter prompts (only if just started) */}
       {messages.length <= 1 && (
         <div className="flex flex-wrap gap-2 mb-3">
-          {STARTER_QUESTIONS.map(q => (
+          {starterQuestions.map(q => (
             <button
               key={q}
               onClick={() => sendMessage(q)}
