@@ -1,21 +1,14 @@
 """
 routers/sql.py
-───────────────
-POST /api/sql/session          — create a new SQL session, register tables
-GET  /api/sql/session/{id}     — inspect a session (tables, columns)
-POST /api/sql/query            — natural language → SQL → execute
-POST /api/sql/raw              — execute raw SQL directly
-GET  /api/sql/history/{id}     — query history for a session
-DELETE /api/sql/session/{id}   — close and free a session
 """
 
 from __future__ import annotations
 
 import os
 from datetime import datetime
-
-from fastapi import APIRouter, HTTPException, Header
 from typing import Annotated, Optional
+
+from fastapi import APIRouter, Header, HTTPException
 
 from models.sql_schemas import (
     NLQueryRequest,
@@ -32,78 +25,92 @@ from utils.session_store import store as df_store
 
 router = APIRouter()
 
-# Simple in-memory history store per session
-# session_id → list of QueryHistoryItem
 _history: dict[str, list] = {}
 
 
-# ── Create session + register tables ─────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Create SQL Session
+# -----------------------------------------------------------------------------
 
 @router.post("/session", response_model=SQLSessionInfo)
 def create_session(req: RegisterTablesRequest):
-    """
-    Create a new DuckDB SQL session and register DataFrames as tables.
-
-    Example request:
-    {
-    "tables": [
-        {"file_id": "uuid-1", "table_name": "sales"},
-        {"file_id": "uuid-2", "table_name": "employees"}
-    ]
-    }
-    """
     session = duck_store.create()
 
-    for t in req.tables:
-        df = df_store.load(t.file_id)
+    for table in req.tables:
+        df = df_store.load(table.file_id)
+
         if df is None:
             duck_store.delete(session.session_id)
             raise HTTPException(
                 status_code=404,
-                detail=f"File ID '{t.file_id}' not found. "
-                    "Upload and clean the file first before creating a SQL session.",
+                detail=f"File '{table.file_id}' not found."
             )
-        session.register(t.table_name, df, t.file_id)
+
+        session.register(table.table_name, df, table.file_id)
 
     _history[session.session_id] = []
+
     return session.to_session_info()
 
 
-# ── Inspect session ────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Get Session
+# -----------------------------------------------------------------------------
 
 @router.get("/session/{session_id}", response_model=SQLSessionInfo)
 def get_session(session_id: str):
+
     session = duck_store.get(session_id)
+
     if not session:
-        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found."
+        )
+
     return session.to_session_info()
 
 
-# ── Natural language query ─────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Natural Language → SQL
+# -----------------------------------------------------------------------------
 
 @router.post("/query", response_model=QueryResult)
 async def nl_query(
     req: NLQueryRequest,
     x_api_key: Annotated[Optional[str], Header()] = None,
 ):
-    """
-    Translate a natural language question to SQL, execute it, and return results.
 
-    Pass your GROQ   API key as the 'x-api-key' header.
-    In production, load it from environment variables instead.
-    """
     session = duck_store.get(req.session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session '{req.session_id}' not found.")
 
-    # Resolve API key: header > environment variable
-    api_key = x_api_key or os.getenv("GROQ_API_KEY", "")
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found."
+        )
+
+    # -------------------------------------------------------------------------
+    # API Key
+    # -------------------------------------------------------------------------
+
+    api_key = (x_api_key or "").strip()
+
     if not api_key:
         raise HTTPException(
             status_code=401,
-            detail="GROQ API key required. Pass it as 'x-api-key' header "
-                "or set GROQ_API_KEY environment variable.",
+            detail="Please enter your Groq API key."
         )
+
+    if not api_key.startswith("gsk_"):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Groq API key format."
+        )
+
+    print("=" * 60)
+    print("Groq key received:", api_key[:10] + "...")
+    print("Length:", len(api_key))
+    print("=" * 60)
 
     result = await nl_to_sql_and_execute(
         question=req.question,
@@ -112,9 +119,9 @@ async def nl_query(
         api_key=api_key,
     )
 
-    # Log to history
-    if result.error is None and req.session_id in _history:
-        _history[req.session_id].append(
+    if result.error is None:
+
+        _history.setdefault(req.session_id, []).append(
             QueryHistoryItem(
                 question=req.question,
                 sql=result.sql,
@@ -126,17 +133,20 @@ async def nl_query(
     return result
 
 
-# ── Raw SQL query ──────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Raw SQL
+# -----------------------------------------------------------------------------
 
 @router.post("/raw", response_model=QueryResult)
 async def raw_query(req: SQLQueryRequest):
-    """
-    Execute a raw SQL query directly (no LLM involved).
-    Used by the SQL editor panel in the frontend.
-    """
+
     session = duck_store.get(req.session_id)
+
     if not session:
-        raise HTTPException(status_code=404, detail=f"Session '{req.session_id}' not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found."
+        )
 
     result = await execute_raw_sql(
         sql=req.sql,
@@ -144,10 +154,11 @@ async def raw_query(req: SQLQueryRequest):
         max_rows=req.max_rows,
     )
 
-    if result.error is None and req.session_id in _history:
-        _history[req.session_id].append(
+    if result.error is None:
+
+        _history.setdefault(req.session_id, []).append(
             QueryHistoryItem(
-                question=f"[RAW] {req.sql[:80]}",
+                question=f"[RAW] {req.sql[:100]}",
                 sql=req.sql,
                 row_count=result.row_count,
                 timestamp=datetime.utcnow().isoformat(),
@@ -157,24 +168,42 @@ async def raw_query(req: SQLQueryRequest):
     return result
 
 
-# ── Query history ──────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# History
+# -----------------------------------------------------------------------------
 
 @router.get("/history/{session_id}", response_model=QueryHistoryResponse)
 def query_history(session_id: str):
+
     if not duck_store.exists(session_id):
-        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found."
+        )
+
     return QueryHistoryResponse(
         session_id=session_id,
         history=_history.get(session_id, []),
     )
 
 
-# ── Delete session ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Delete Session
+# -----------------------------------------------------------------------------
 
 @router.delete("/session/{session_id}")
 def delete_session(session_id: str):
+
     if not duck_store.exists(session_id):
-        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found."
+        )
+
     duck_store.delete(session_id)
     _history.pop(session_id, None)
-    return {"deleted": True, "session_id": session_id}
+
+    return {
+        "deleted": True,
+        "session_id": session_id,
+    }

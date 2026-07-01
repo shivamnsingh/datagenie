@@ -234,7 +234,21 @@ async def nl_to_sql_and_execute(
     t_start = time.perf_counter()
 
     # ── Step 1: Call Groq API ────────────────────────────────────
-    groq_key = api_key or os.getenv("GROQ_API_KEY", "")
+    groq_key = api_key.strip() if api_key else ""
+
+    if not groq_key:
+        return _error_result(
+            question,
+            "",
+            "Please enter your Groq API key."
+        )
+
+    if not groq_key.startswith("gsk_"):
+        return _error_result(
+            question,
+            "",
+            "Invalid Groq API key format. Groq API keys should start with 'gsk_'."
+        )
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
