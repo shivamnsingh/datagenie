@@ -6,6 +6,7 @@ Detects column types, nulls, uniqueness, potential keys, and join candidates.
 """
 
 from __future__ import annotations
+from datetime import datetime
 import re
 import uuid
 from typing import List
@@ -20,6 +21,25 @@ from models.schemas import ColumnProfile, JoinSuggestion, SchemaReport
 
 _ID_PATTERN = re.compile(r"(^id$|_id$|^id_|_key$|_code$)", re.IGNORECASE)
 
+# Sample only a small slice of each column so schema inference stays fast on uploads.
+_DATETIME_SAMPLE_SIZE = 50
+
+# Require most sampled values to parse before we call a column datetime.
+_DATETIME_SUCCESS_THRESHOLD = 0.80
+
+# Explicit formats keep parsing deterministic and avoid pandas' format inference warning.
+_DATETIME_FORMATS = (
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%d-%m-%Y",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%d %b %Y",
+    "%d %B %Y",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y/%m/%d %H:%M:%S",
+)
+
 
 def _is_pk_candidate(col: str, series: pd.Series) -> bool:
     """High uniqueness + ID-like name → probable primary key."""
@@ -28,12 +48,54 @@ def _is_pk_candidate(col: str, series: pd.Series) -> bool:
 
 
 def _detect_datetime(series: pd.Series) -> bool:
-    sample = series.dropna().head(50).astype(str)
-    try:
-        pd.to_datetime(sample, errors="raise")
-        return True
-    except Exception:
+    """Detect datetime-like columns without triggering pandas inference warnings.
+
+    The check is intentionally conservative:
+    - ignore null/empty values
+    - inspect only a small sample for speed
+    - try a handful of explicit formats vectorized first
+    - fall back to per-value format checks only if the batch pass is inconclusive
+    - classify as datetime only when at least 80% of sampled values parse
+    """
+
+    # Remove nulls, blanks, and repeated placeholders before testing.
+    sample = (
+        series.dropna()
+        .astype(str)
+        .str.strip()
+    )
+    sample = sample[sample.ne("")]
+    sample = sample[~sample.str.lower().isin({"nan", "nat", "none"})]
+    sample = sample.drop_duplicates().head(_DATETIME_SAMPLE_SIZE)
+
+    if sample.empty:
         return False
+
+    # First try explicit formats in a vectorized way. This is fast and warning-free.
+    # It also handles the common case where a column uses one consistent date layout.
+    best_ratio = 0.0
+    for fmt in _DATETIME_FORMATS:
+        parsed = pd.to_datetime(sample, format=fmt, errors="coerce", cache=True)
+        ratio = float(parsed.notna().mean())
+        if ratio > best_ratio:
+            best_ratio = ratio
+        if best_ratio >= _DATETIME_SUCCESS_THRESHOLD:
+            return True
+
+    # If the batch pass was close but not definitive, test each sampled value against
+    # the same explicit formats. This is still bounded by the small sample size and
+    # avoids pandas' format inference fallback entirely.
+    successful = 0
+    for value in sample:
+        for fmt in _DATETIME_FORMATS:
+            try:
+                datetime.strptime(value, fmt)
+                successful += 1
+                break
+            except ValueError:
+                continue
+
+    return (successful / len(sample)) >= _DATETIME_SUCCESS_THRESHOLD
 
 
 def _sample_values(series: pd.Series, n: int = 5) -> list:
