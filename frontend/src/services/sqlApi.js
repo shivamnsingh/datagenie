@@ -13,7 +13,7 @@ const BASE = `${API_BASE_URL}/sql`;
  * @param {Array<{file_id: string, table_name: string}>} tables
  */
 export async function createSQLSession(tables) {
-  const res = await fetch(`${BASE}/session`, {
+  const res = await fetch(`${BASE}/session`, {  
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tables }),
