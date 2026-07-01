@@ -2,7 +2,9 @@
 // ─────────────────────
 // All HTTP calls to the FastAPI backend.
 
-const BASE = "http://localhost:8000/api";
+import { API_BASE_URL } from "../config";
+
+const BASE = API_BASE_URL;
 
 // ── Ingest ────────────────────────────────────────────────────────────────────
 

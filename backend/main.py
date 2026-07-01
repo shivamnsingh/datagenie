@@ -3,10 +3,13 @@ DataGenie AI — FastAPI Backend
 Entry point. Mounts all routers.
 """
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import ingest, clean, export, sql, rag  # ← add sql, rag
+
+load_dotenv()
 
 app = FastAPI(
     title="DataGenie AI",
@@ -17,7 +20,10 @@ app = FastAPI(
 # ── CORS (React dev server runs on :3000) ──────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "https://datagenie-eight.vercel.app",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

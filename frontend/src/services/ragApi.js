@@ -2,7 +2,9 @@
 // ─────────────────────────
 // HTTP calls for the RAG chat engine.
 
-const BASE = "http://localhost:8000/api/rag";
+import { API_BASE_URL } from "../config";
+
+const BASE = `${API_BASE_URL}/rag`;
 
 /**
  * Build a vector index from cleaned file_ids.

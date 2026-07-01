@@ -2,7 +2,9 @@
 // ─────────────────────────
 // All HTTP calls for the SQL engine.
 
-const BASE = "http://localhost:8000/api/sql";
+import { API_BASE_URL } from "../config";
+
+const BASE = `${API_BASE_URL}/sql`;
 
 // ── Session management ────────────────────────────────────────────────────────
 
