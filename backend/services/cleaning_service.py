@@ -12,6 +12,7 @@ Each cleaning step is isolated and logged for the audit trail.
 
 from __future__ import annotations
 
+import gc
 import uuid
 from typing import List, Tuple
 
@@ -46,18 +47,25 @@ def _quality_score(df: pd.DataFrame) -> float:
     if df.empty:
         return 0.0
 
-    total_cells = df.size
-    null_cells = df.isna().sum().sum()
-    completeness = 60 * (1 - null_cells / total_cells)
+    if len(df) > 100_000:
+        sample = df.head(1_000)
+        total_cells = max(sample.size, 1)
+        null_cells = int(sample.isna().sum().sum())
+        dup_pct = sample.duplicated().sum() / len(sample)
+        obj_cols = sample.select_dtypes(include="object").columns
+    else:
+        total_cells = df.size
+        null_cells = df.isna().sum().sum()
+        dup_pct = df.duplicated().sum() / len(df)
+        obj_cols = df.select_dtypes(include="object").columns
 
-    dup_pct = df.duplicated().sum() / len(df)
+    completeness = 60 * (1 - null_cells / total_cells)
     uniqueness = 20 * (1 - dup_pct)
 
     # Penalise object columns that parse as numeric
-    obj_cols = df.select_dtypes(include="object").columns
     bad = 0
     for c in obj_cols:
-        converted = pd.to_numeric(df[c], errors="coerce")
+        converted = pd.to_numeric(sample[c] if len(df) > 100_000 else df[c], errors="coerce")
         if converted.notna().mean() > 0.8:
             bad += 1
     type_score = 20 * max(0, 1 - bad / max(len(obj_cols), 1))
@@ -275,8 +283,7 @@ def _apply_standardization(
         ))
 
     if cfg.drop_constant_columns:
-        before = list(df.columns)
-        const_cols = [c for c in df.columns if df[c].nunique(dropna=False) <= 1]
+        const_cols = df.columns[df.nunique(dropna=False) <= 1].tolist()
         df = df.drop(columns=const_cols)
         steps.append(CleaningStep(
             step="standardization", column=None,
@@ -305,7 +312,7 @@ def preview_cleaning(config: CleaningConfig) -> CleaningSummaryPreview:
     """
     Dry-run: estimate what the cleaning will do WITHOUT mutating the dataframe.
     """
-    df = store.load(config.file_id)
+    df = store.load(config.file_id, copy=False)
     if df is None:
         raise ValueError(f"File ID {config.file_id!r} not found in session store.")
 
@@ -364,7 +371,12 @@ def preview_cleaning(config: CleaningConfig) -> CleaningSummaryPreview:
     # Standardization steps (estimated)
     std = config.standardization
     if std.drop_duplicates:
-        dup_drop = int(df.duplicated().sum())
+        if len(df) > 100_000:
+            dup_sample = df.head(100)
+            dup_ratio = float(dup_sample.duplicated().sum() / max(len(dup_sample), 1)) if len(dup_sample) else 0.0
+            dup_drop = int(round(dup_ratio * len(df)))
+        else:
+            dup_drop = int(df.duplicated().sum())
         estimated_drop += dup_drop
         steps.append(CleaningStep(
             step="standardization", column=None,
@@ -451,6 +463,9 @@ def apply_cleaning(config: CleaningConfig) -> CleaningResult:
     # Save under new ID
     clean_file_id = str(uuid.uuid4())
     store.save(clean_file_id, df)
+
+    del df
+    gc.collect()
 
     return CleaningResult(
         original_file_id=config.file_id,

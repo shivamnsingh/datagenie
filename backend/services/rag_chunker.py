@@ -25,6 +25,9 @@ import pandas as pd
 
 Chunk = Tuple[str, str]   # (text_content, source_label)
 
+_LARGE_DATASET_THRESHOLD = 100_000
+_SCHEMA_SAMPLE_SIZE = 100
+
 
 # ══════════════════════════════════════════════════════════════════
 # HELPERS
@@ -39,6 +42,14 @@ def _fmt(v) -> str:
     return str(v)
 
 
+def _sample_non_null(series: pd.Series, limit: int = _SCHEMA_SAMPLE_SIZE) -> pd.Series:
+    sample = series.head(limit)
+    sample = sample[sample.notna()]
+    if len(sample) <= limit:
+        return sample
+    return sample.head(limit)
+
+
 # ══════════════════════════════════════════════════════════════════
 # CHUNK GENERATORS
 # ══════════════════════════════════════════════════════════════════
@@ -47,8 +58,23 @@ def _schema_chunk(df: pd.DataFrame, table_name: str) -> Chunk:
     lines = [f"TABLE: {table_name}", f"Rows: {len(df):,}  Columns: {len(df.columns)}"]
     for col in df.columns:
         s = df[col]
-        null_pct = s.isna().mean() * 100
-        unique = s.nunique()
+        if len(df) > _LARGE_DATASET_THRESHOLD:
+            sample = s.head(_SCHEMA_SAMPLE_SIZE)
+            null_pct = float(sample.isna().mean()) * 100 if len(sample) else 0.0
+        else:
+            null_pct = float(s.isna().mean()) * 100
+        if len(df) > _LARGE_DATASET_THRESHOLD:
+            sample = s.head(_SCHEMA_SAMPLE_SIZE)
+            sample = sample[sample.notna()]
+            if sample.empty:
+                unique = 0
+            else:
+                sample_unique = int(sample.nunique(dropna=True))
+                sample_non_null_ratio = len(sample) / max(len(s.head(_SCHEMA_SAMPLE_SIZE)), 1)
+                estimated_non_null = max(1, int(round(sample_non_null_ratio * len(s))))
+                unique = int(round((sample_unique / max(len(sample), 1)) * estimated_non_null))
+        else:
+            unique = int(s.nunique(dropna=True))
         dtype = str(s.dtype)
         lines.append(
             f"  {col} [{dtype}] — {unique:,} unique values, {null_pct:.1f}% null"
@@ -93,8 +119,8 @@ def _sample_row_chunks(
     for start in range(0, total, chunk_size):
         batch = subset.iloc[start : start + chunk_size]
         lines = [f"SAMPLE ROWS from {table_name} (rows {start+1}–{start+len(batch)}):"]
-        for _, row in batch.iterrows():
-            row_str = "  { " + ",  ".join(f"{c}: {_fmt(row[c])}" for c in df.columns) + " }"
+        for row in batch.itertuples(index=False, name=None):
+            row_str = "  { " + ",  ".join(f"{c}: {_fmt(value)}" for c, value in zip(df.columns, row)) + " }"
             lines.append(row_str)
         chunks.append(("\n".join(lines), f"{table_name} · rows {start+1}-{start+len(batch)}"))
 
@@ -107,11 +133,21 @@ def _category_chunks(df: pd.DataFrame, table_name: str) -> List[Chunk]:
     cat_cols = df.select_dtypes(include=["object", "category"]).columns
 
     for col in cat_cols:
-        vc = df[col].value_counts(dropna=True).head(20)
+        if len(df) > _LARGE_DATASET_THRESHOLD:
+            series = df[col].head(1_000)
+            series = series[series.notna()]
+        else:
+            series = df[col].dropna()
+
+        vc = series.value_counts(dropna=True).head(20)
         if len(vc) == 0:
             continue
-        total = df[col].notna().sum()
-        lines = [f"VALUE DISTRIBUTION: {table_name}.{col} (top {len(vc)} of {df[col].nunique()} unique)"]
+        total = max(int(series.notna().sum()), 1)
+        if len(df) > _LARGE_DATASET_THRESHOLD:
+            unique_count = int(series.nunique(dropna=True))
+        else:
+            unique_count = int(df[col].nunique(dropna=True))
+        lines = [f"VALUE DISTRIBUTION: {table_name}.{col} (top {len(vc)} of {unique_count} unique)"]
         for val, cnt in vc.items():
             pct = cnt / total * 100
             lines.append(f"  {_fmt(val)}: {cnt:,} ({pct:.1f}%)")
@@ -153,15 +189,16 @@ def _date_summary_chunk(df: pd.DataFrame, table_name: str) -> List[Chunk]:
             if not any(kw in col.lower() for kw in ("date", "time", "month", "year")):
                 continue
             try:
-                parsed = pd.to_datetime(df[col], infer_datetime_format=True, errors="coerce")
+                parsed = pd.to_datetime(df[col], errors="coerce")
                 if parsed.notna().mean() < 0.8:
                     continue
-                df = df.copy()
-                df[col] = parsed
+                s = parsed
             except Exception:
                 continue
+        else:
+            s = df[col]
 
-        s = df[col].dropna()
+        s = s.dropna()
         if len(s) == 0:
             continue
 

@@ -47,7 +47,7 @@ async def build_index(
     total_chunks = 0
 
     for file_id in file_ids:
-        df = df_store.load(file_id)
+        df = df_store.load(file_id, copy=False)
         if df is None:
             continue
         table_name = table_names.get(file_id, file_id[:8])

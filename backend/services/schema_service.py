@@ -21,6 +21,10 @@ from models.schemas import ColumnProfile, JoinSuggestion, SchemaReport
 
 _ID_PATTERN = re.compile(r"(^id$|_id$|^id_|_key$|_code$)", re.IGNORECASE)
 
+# Keep schema inference bounded even on wide or tall uploads.
+_SCHEMA_SAMPLE_SIZE = 100
+_LARGE_DATASET_THRESHOLD = 100_000
+
 # Sample only a small slice of each column so schema inference stays fast on uploads.
 _DATETIME_SAMPLE_SIZE = 50
 
@@ -41,9 +45,44 @@ _DATETIME_FORMATS = (
 )
 
 
+def _sample_non_null(series: pd.Series, limit: int = _SCHEMA_SAMPLE_SIZE) -> pd.Series:
+    sample = series.head(limit)
+    sample = sample[sample.notna()]
+    if len(sample) <= limit:
+        return sample
+    return sample.head(limit)
+
+
+def _estimate_unique_count(series: pd.Series) -> int:
+    total_count = len(series)
+    if total_count == 0:
+        return 0
+
+    if total_count <= _LARGE_DATASET_THRESHOLD:
+        return int(series.nunique(dropna=True))
+
+    sample = series.head(_SCHEMA_SAMPLE_SIZE)
+    sample_non_null = sample[sample.notna()]
+    if sample_non_null.empty:
+        return 0
+
+    sample_unique = int(sample_non_null.nunique(dropna=True))
+    sample_size = max(len(sample_non_null), 1)
+    sample_unique_ratio = sample_unique / sample_size
+    sample_non_null_ratio = len(sample_non_null) / max(len(sample), 1)
+    estimated_non_null = max(1, int(round(sample_non_null_ratio * total_count)))
+    estimated = int(round(sample_unique_ratio * estimated_non_null))
+    return min(total_count, max(sample_unique, estimated))
+
+
 def _is_pk_candidate(col: str, series: pd.Series) -> bool:
     """High uniqueness + ID-like name → probable primary key."""
-    uniqueness = series.nunique() / max(len(series), 1)
+    sample = series.head(_SCHEMA_SAMPLE_SIZE)
+    sample = sample[sample.notna()]
+    if sample.empty:
+        return False
+
+    uniqueness = sample.nunique(dropna=True) / max(len(sample), 1)
     return uniqueness > 0.95 and bool(_ID_PATTERN.search(col))
 
 
@@ -59,14 +98,10 @@ def _detect_datetime(series: pd.Series) -> bool:
     """
 
     # Remove nulls, blanks, and repeated placeholders before testing.
-    sample = (
-        series.dropna()
-        .astype(str)
-        .str.strip()
-    )
+    sample = series.head(_SCHEMA_SAMPLE_SIZE).astype(str).str.strip()
     sample = sample[sample.ne("")]
     sample = sample[~sample.str.lower().isin({"nan", "nat", "none"})]
-    sample = sample.drop_duplicates().head(_DATETIME_SAMPLE_SIZE)
+    sample = sample.drop_duplicates().head(_SCHEMA_SAMPLE_SIZE)
 
     if sample.empty:
         return False
@@ -99,7 +134,9 @@ def _detect_datetime(series: pd.Series) -> bool:
 
 
 def _sample_values(series: pd.Series, n: int = 5) -> list:
-    vals = series.dropna().unique()[:n]
+    sample = series.head(max(n, _SCHEMA_SAMPLE_SIZE))
+    sample = sample[sample.notna()]
+    vals = sample.head(n)
     return [v.item() if hasattr(v, "item") else v for v in vals]
 
 
@@ -116,9 +153,14 @@ def build_schema_report(
     cols: List[ColumnProfile] = []
     for col in df.columns:
         s = df[col]
-        null_count = int(s.isna().sum())
-        null_pct = round(null_count / len(s) * 100, 2) if len(s) else 0.0
-        unique_count = int(s.nunique(dropna=True))
+        if len(df) > _LARGE_DATASET_THRESHOLD:
+            sample = s.head(_SCHEMA_SAMPLE_SIZE)
+            null_pct = round(float(sample.isna().mean()) * 100, 2) if len(sample) else 0.0
+            null_count = int(round((null_pct / 100) * len(s)))
+        else:
+            null_count = int(s.isna().sum())
+            null_pct = round(null_count / len(s) * 100, 2) if len(s) else 0.0
+        unique_count = _estimate_unique_count(s)
         is_numeric = pd.api.types.is_numeric_dtype(s)
         is_dt = False if is_numeric else _detect_datetime(s)
         is_cat = (
@@ -142,7 +184,12 @@ def build_schema_report(
             )
         )
 
-    dup_count = int(df.duplicated().sum())
+    if len(df) > _LARGE_DATASET_THRESHOLD:
+        dup_sample = df.head(_SCHEMA_SAMPLE_SIZE)
+        dup_ratio = float(dup_sample.duplicated().sum() / max(len(dup_sample), 1)) if len(dup_sample) else 0.0
+        dup_count = int(round(dup_ratio * len(df)))
+    else:
+        dup_count = int(df.duplicated().sum())
     dup_pct = round(dup_count / len(df) * 100, 2) if len(df) else 0.0
 
     return SchemaReport(
@@ -153,7 +200,7 @@ def build_schema_report(
         columns=cols,
         duplicate_row_count=dup_count,
         duplicate_row_pct=dup_pct,
-        memory_mb=round(df.memory_usage(deep=True).sum() / 1e6, 3),
+        memory_mb=round(df.memory_usage(deep=False).sum() / 1e6, 3),
     )
 
 

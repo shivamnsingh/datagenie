@@ -55,7 +55,7 @@ def null_report(file_id: str):
     Returns per-column null statistics.
     Used to populate the cleaning UI choices.
     """
-    df = store.load(file_id)
+    df = store.load(file_id, copy=False)
     if df is None:
         raise HTTPException(status_code=404, detail=f"File ID '{file_id}' not found.")
 
@@ -85,7 +85,7 @@ def outlier_report(file_id: str):
     """
     Returns IQR-based outlier counts for every numeric column.
     """
-    df = store.load(file_id)
+    df = store.load(file_id, copy=False)
     if df is None:
         raise HTTPException(status_code=404, detail=f"File ID '{file_id}' not found.")
 
@@ -124,13 +124,14 @@ def outlier_report(file_id: str):
 @router.get("/duplicates/{file_id}")
 def duplicate_report(file_id: str):
     """Returns duplicate row count and sample duplicate rows."""
-    df = store.load(file_id)
+    df = store.load(file_id, copy=False)
     if df is None:
         raise HTTPException(status_code=404, detail=f"File ID '{file_id}' not found.")
 
     dup_mask = df.duplicated(keep=False)
     dup_count = int(df.duplicated().sum())
-    sample = df[dup_mask].head(5).where(pd.notnull(df[dup_mask].head(5)), None)
+    dup_rows = df.loc[dup_mask].head(5)
+    sample = dup_rows.where(pd.notnull(dup_rows), None)
 
     return {
         "file_id": file_id,

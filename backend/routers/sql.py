@@ -37,7 +37,7 @@ def create_session(req: RegisterTablesRequest):
     session = duck_store.create()
 
     for table in req.tables:
-        df = df_store.load(table.file_id)
+        df = df_store.load(table.file_id, copy=False)
 
         if df is None:
             duck_store.delete(session.session_id)

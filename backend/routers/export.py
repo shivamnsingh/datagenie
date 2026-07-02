@@ -21,7 +21,7 @@ router = APIRouter()
 
 @router.post("/")
 def export_dataset(req: ExportRequest):
-    df = store.load(req.file_id)
+    df = store.load(req.file_id, copy=False)
     if df is None:
         raise HTTPException(status_code=404, detail=f"File ID '{req.file_id}' not found.")
 

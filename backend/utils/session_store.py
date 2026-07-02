@@ -20,12 +20,14 @@ class SessionStore:
 
     def save(self, file_id: str, df: pd.DataFrame) -> None:
         with self._lock:
-            self._store[file_id] = df.copy()
+            self._store[file_id] = df
 
-    def load(self, file_id: str) -> Optional[pd.DataFrame]:
+    def load(self, file_id: str, copy: bool = True) -> Optional[pd.DataFrame]:
         with self._lock:
             df = self._store.get(file_id)
-            return df.copy() if df is not None else None
+            if df is None:
+                return None
+            return df.copy() if copy else df
 
     def delete(self, file_id: str) -> None:
         with self._lock:
