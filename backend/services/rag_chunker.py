@@ -17,7 +17,7 @@ both "what is the data?" and "why is X happening?" questions.
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -27,6 +27,7 @@ Chunk = Tuple[str, str]   # (text_content, source_label)
 
 _LARGE_DATASET_THRESHOLD = 100_000
 _SCHEMA_SAMPLE_SIZE = 100
+_MAX_CHUNKS_PER_DATASET = 1000
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -156,11 +157,13 @@ def _category_chunks(df: pd.DataFrame, table_name: str) -> List[Chunk]:
     return chunks
 
 
-def _correlation_chunk(df: pd.DataFrame, table_name: str) -> Chunk:
+def _correlation_chunk(df: pd.DataFrame, table_name: str) -> Optional[Chunk]:
     """Top correlated numeric pairs — helps answer 'what drives X?' questions."""
     num_df = df.select_dtypes(include="number")
     if len(num_df.columns) < 2:
         return f"TABLE: {table_name}\nInsufficient numeric columns for correlation.", f"{table_name} · correlations"
+    if len(num_df.columns) > 100:
+        return f"TABLE: {table_name}\nToo many numeric columns ({len(num_df.columns)}) for correlation analysis.", f"{table_name} · correlations"   
 
     corr = num_df.corr().abs()
     # Flatten upper triangle
@@ -239,13 +242,34 @@ def build_chunks(
     """
     chunks: List[Chunk] = []
 
-    chunks.append(_schema_chunk(df, table_name))
-    chunks.append(_statistics_chunk(df, table_name))
-    chunks.append(_correlation_chunk(df, table_name))
-    chunks.extend(_category_chunks(df, table_name))
-    chunks.extend(_date_summary_chunk(df, table_name))
+    def append_chunk(chunk: Chunk) -> bool:
+        if len(chunks) >= _MAX_CHUNKS_PER_DATASET:
+            return False
+        chunks.append(chunk)
+        return True
+
+    def extend_chunks(new_chunks: List[Chunk]) -> bool:
+        for chunk in new_chunks:
+            if not append_chunk(chunk):
+                return False
+        return True
+
+    if not append_chunk(_schema_chunk(df, table_name)):
+        return chunks
+    if not append_chunk(_statistics_chunk(df, table_name)):
+        return chunks
+    correlation_chunk = _correlation_chunk(df, table_name)
+    if correlation_chunk is not None and not append_chunk(correlation_chunk):
+        return chunks
+    if not extend_chunks(_category_chunks(df, table_name)):
+        return chunks
+    if not extend_chunks(_date_summary_chunk(df, table_name)):
+        return chunks
 
     if include_sample_rows:
-        chunks.extend(_sample_row_chunks(df, table_name))
+        extend_chunks(_sample_row_chunks(df, table_name, max_chunks=max(
+            0,
+            _MAX_CHUNKS_PER_DATASET - len(chunks),
+        )))
 
     return chunks
