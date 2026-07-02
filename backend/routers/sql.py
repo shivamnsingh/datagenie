@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException
+from cachetools import TTLCache
 
 from models.sql_schemas import (
     NLQueryRequest,
@@ -25,7 +26,9 @@ from utils.session_store import store as df_store
 
 router = APIRouter()
 
-_history: dict[str, list] = {}
+# Bounded + auto-expiring, matching duck_store's lifecycle (session_id keys are
+# 1:1 with DuckDB sessions) so query history doesn't accumulate forever.
+_history: "TTLCache[str, list]" = TTLCache(maxsize=5, ttl=1800)
 
 
 # -----------------------------------------------------------------------------

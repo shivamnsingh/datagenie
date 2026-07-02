@@ -25,6 +25,13 @@ from typing import Dict, List, Optional, Tuple
 
 import httpx
 import numpy as np
+from cachetools import TTLCache
+
+# Max concurrently-cached RAG indexes and how long each lives before
+# automatic eviction, so embeddings don't accumulate forever across
+# the life of the process.
+_MAXSIZE = 5
+_TTL_SECONDS = 1800  # 30 minutes
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -163,19 +170,21 @@ class RAGIndex:
 # ══════════════════════════════════════════════════════════════════
 
 class VectorStore:
-    def __init__(self):
-        self._indexes: Dict[str, RAGIndex] = {}
+    def __init__(self, maxsize: int = _MAXSIZE, ttl: int = _TTL_SECONDS):
+        self._indexes: "TTLCache[str, RAGIndex]" = TTLCache(maxsize=maxsize, ttl=ttl)
         self._lock = threading.RLock()
 
     def create(self) -> RAGIndex:
         session_id = str(uuid.uuid4())
         idx = RAGIndex(session_id)
         with self._lock:
+            self._indexes.expire()
             self._indexes[session_id] = idx
         return idx
 
     def get(self, session_id: str) -> Optional[RAGIndex]:
         with self._lock:
+            self._indexes.expire()
             return self._indexes.get(session_id)
 
     def delete(self, session_id: str) -> None:
@@ -184,6 +193,7 @@ class VectorStore:
 
     def exists(self, session_id: str) -> bool:
         with self._lock:
+            self._indexes.expire()
             return session_id in self._indexes
 
 
