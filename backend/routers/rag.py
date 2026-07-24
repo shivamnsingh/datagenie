@@ -25,15 +25,12 @@ async def create_index(
     req: BuildIndexRequest,
     x_api_key: Annotated[Optional[str], Header()] = None,
 ):
-    # Groq key is optional for index building (uses pseudo-embeddings without it)
-    api_key = x_api_key or os.getenv("GROQ_API_KEY", "")
-
+    # Index building may use external embedding provider if configured
     try:
         result = await build_index(
             file_ids=req.file_ids,
             table_names=req.table_names,
             extra_context=req.extra_context,
-            api_key=api_key,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Index build failed: {e}")
@@ -71,19 +68,10 @@ async def chat(
             detail=f"RAG session '{req.rag_session_id}' not found. Build an index first.",
         )
 
-    api_key = x_api_key or os.getenv("GROQ_API_KEY", "")
-    if not api_key:
-        raise HTTPException(
-            status_code=401,
-            detail="Groq API key required. Pass as 'x-api-key' header "
-                   "or set GROQ_API_KEY environment variable.",
-        )
-
     return await rag_chat(
         rag_session_id=req.rag_session_id,
         question=req.question,
         conversation_history=req.conversation_history,
-        api_key=api_key,
     )
 
 

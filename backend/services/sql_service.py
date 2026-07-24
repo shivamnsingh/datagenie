@@ -4,16 +4,16 @@ services/sql_service.py
 The Text-to-SQL brain.
 
 Flow:
-  1. Build a schema context string from registered tables
-  2. Call Claude API with the schema + user question
-  3. Parse the SQL from Claude's response
-  4. Validate it with sql_validator.py
-  5. Execute via DuckDB
-  6. Auto-suggest the best visualization for the result
-  7. Return QueryResult
+    1. Build a schema context string from registered tables
+    2. Call the LLM (Gemini) via the LLMService with the schema + user question
+    3. Parse the SQL from the LLM response
+    4. Validate it with sql_validator.py
+    5. Execute via DuckDB
+    6. Auto-suggest the best visualization for the result
+    7. Return QueryResult
 
-Claude is prompted with strict rules — never hallucinate columns,
-always show only what's in the schema, ask for clarification if ambiguous.
+LLM is prompted with strict rules — never hallucinate columns, always use only
+the provided schema and ask for clarification if ambiguous.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-import httpx
 import pandas as pd
 
 from models.sql_schemas import (
@@ -36,6 +35,7 @@ from models.sql_schemas import (
     VizSuggestion,
 )
 from services.sql_validator import validate_sql
+# Use the centralized llm_service via runtime import where needed
 from utils.duck_session import DuckSession
 
 
@@ -45,8 +45,8 @@ from utils.duck_session import DuckSession
 
 def build_schema_context(tables: Dict[str, TableInfo]) -> str:
     """
-    Build a compact schema string to inject into the Claude prompt.
-    Format keeps token count low while giving Claude everything it needs.
+    Build a compact schema string to inject into the LLM system prompt.
+    Format keeps token count low while giving the model everything it needs.
     """
     lines = ["Available SQL tables (DuckDB syntax):"]
     for tname, info in tables.items():
@@ -72,7 +72,7 @@ def build_schema_context(tables: Dict[str, TableInfo]) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# CLAUDE PROMPT
+# SYSTEM PROMPT
 # ══════════════════════════════════════════════════════════════════
 
 def _build_system_prompt(schema_context: str) -> str:
@@ -103,9 +103,9 @@ RESPONSE FORMAT — always respond with valid JSON in this exact structure:
 No markdown, no code fences, just raw JSON."""
 
 
-def _parse_claude_response(content: str) -> Tuple[str, str, str]:
+def _parse_llm_response(content: str) -> Tuple[str, str, str]:
     """
-    Parse Claude's JSON response.
+    Parse LLM JSON response.
     Returns (sql, explanation, clarification_needed).
     Falls back gracefully if JSON is malformed.
     """
@@ -216,8 +216,8 @@ def _suggest_viz(df: pd.DataFrame, sql: str) -> Optional[VizSuggestion]:
 # MAIN SERVICE
 # ══════════════════════════════════════════════════════════════════
 
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL   = "llama-3.3-70b-versatile"
+
+
 
 
 async def nl_to_sql_and_execute(
@@ -233,69 +233,99 @@ async def nl_to_sql_and_execute(
     system_prompt = _build_system_prompt(schema_ctx)
     t_start = time.perf_counter()
 
-    # ── Step 1: Call Groq API ────────────────────────────────────
-    groq_key = api_key.strip() if api_key else ""
+    # ── Step 1: Call Gemini (via LLMService) to generate SQL ──────
+    from llm import llm_service
 
-    if not groq_key:
-        return _error_result(
-            question,
-            "",
-            "Please enter your Groq API key."
-        )
+    prompt = system_prompt + "\n\nUser question: " + question + "\n\nRespond in the exact JSON format specified in the system prompt."
 
-    if not groq_key.startswith("gsk_"):
-        return _error_result(
-            question,
-            "",
-            "Invalid Groq API key format. Groq API keys should start with 'gsk_'."
-        )
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {groq_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": GROQ_MODEL,
-                    "max_tokens": 1024,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user",   "content": question},
-                    ],
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            raw_content = data["choices"][0]["message"]["content"]
-    except httpx.HTTPStatusError as e:
-        return _error_result(question, "", f"Groq API error {e.response.status_code}: {e.response.text}")
+        gen = await llm_service.generate_sql(prompt)
+        raw_content = gen.get("raw", "")
+        sql = gen.get("sql")
+        # If the LLM returned a JSON structure, try to parse explanation
+        explanation = ""
+        clarification = ""
+        if raw_content:
+            sql_p, explanation_p, clarification_p = _parse_llm_response(raw_content)
+            # prefer explicit sql from parsing if extract found it
+            if sql_p:
+                sql = sql_p
+            explanation = explanation_p
+            clarification = clarification_p
     except Exception as e:
-        return _error_result(question, "", f"Failed to reach Groq API: {e}")
-
-    # ── Step 2: Parse response ───────────────────────────────────
-    sql, explanation, clarification = _parse_claude_response(raw_content)
+        return _error_result(question, "", f"LLM provider error: {e}")
 
     if clarification:
         return _error_result(question, sql, f"Clarification needed: {clarification}")
 
     if not sql:
-        return _error_result(question, sql, "Claude did not return a SQL query. Please rephrase your question.")
+        return _error_result(question, sql, "LLM did not return a SQL query. Please rephrase your question.")
 
-    # ── Step 3: Validate ─────────────────────────────────────────
-    validation = validate_sql(sql, session.tables)
-    if not validation.is_valid:
-        return _error_result(
-            question, sql,
-            "Generated SQL failed validation:\n" + "\n".join(validation.issues)
+    # ── Step 3+4: Validate → Execute, with unified auto-repair ────
+    # Both a validation failure (e.g. Gemini referencing a table/column
+    # that doesn't exist) and an execution failure (a DuckDB error) are
+    # "the SQL is wrong" in the same sense — both get fed back to Gemini
+    # for repair, up to 2 retries total. Previously only execution
+    # failures triggered repair, so a validation failure (like a stray
+    # unknown table) surfaced immediately as an unrecoverable error even
+    # though it's exactly the class of mistake auto-repair exists to fix.
+    last_error: Optional[Exception | str] = None
+    validation = None
+    result_df = None
+
+    for attempt in range(0, 3):
+        validation = validate_sql(sql, session.tables)
+
+        if not validation.is_valid:
+            last_error = "Validation failed: " + "; ".join(validation.issues)
+        else:
+            try:
+                result_df = session.execute(sql)
+                last_error = None
+                break
+            except Exception as e:
+                last_error = e
+
+        if attempt >= 2:
+            break
+
+        # build repair prompt from whichever kind of failure just happened
+        repair_prompt = (
+            system_prompt
+            + "\n\nUser question: "
+            + question
+            + "\n\nPreviously generated SQL: "
+            + (sql or "")
+            + "\n\nThis SQL failed with the following problem:\n"
+            + str(last_error)
+            + "\n\nPlease return a corrected SQL query in the same JSON format: {\"sql\": \"...\", \"explanation\": \"...\", \"assumptions\": \"\", \"clarification_needed\": \"\"}. Reply only with JSON."
         )
+        try:
+            repair_raw = await llm_service.generate_raw(repair_prompt, temperature=0.0, max_tokens=1024)
+            repaired_sql, repaired_explanation, repaired_clarification = _parse_llm_response(repair_raw)
+            if repaired_sql:
+                sql = repaired_sql
+                explanation = repaired_explanation or explanation
+                clarification = repaired_clarification or clarification
+                continue
+            else:
+                from llm.utils import extract_sql as _extract_sql
 
-    # ── Step 4: Execute ──────────────────────────────────────────
-    try:
-        result_df = session.execute(sql)
-    except Exception as e:
-        return _error_result(question, sql, f"SQL execution failed: {e}")
+                candidate = _extract_sql(repair_raw or "")
+                if candidate:
+                    sql = candidate
+                    continue
+                # repair produced nothing usable — stop retrying, keep last_error
+                break
+        except Exception:
+            # repair call itself failed — stop retrying, keep last_error
+            break
+
+    # Note: do not close the global llm_service here; lifecycle is handled by app shutdown.
+
+    if last_error is not None or result_df is None:
+        prefix = "Generated SQL failed validation" if isinstance(last_error, str) else "SQL execution failed after retries"
+        return _error_result(question, sql, f"{prefix}: {last_error}")
 
     elapsed_ms = (time.perf_counter() - t_start) * 1000
 
@@ -381,12 +411,19 @@ async def execute_raw_sql(
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _error_result(question: str, sql: str, error: str) -> QueryResult:
-    from utils.duck_session import DuckSession
+def _error_result(question: str, sql: Optional[str], error: str) -> QueryResult:
+    """Build a QueryResult representing a failed query.
+
+    `sql` may legitimately be None here — e.g. when the question wasn't a
+    data question at all ("who are u") and Gemini returned no SQL, or asked
+    for clarification instead. QueryResult.sql is a required str field, so
+    None must be coerced to "" or pydantic raises a ValidationError that
+    turns this "friendly error response" path into an unhandled 500.
+    """
     return QueryResult(
         session_id="",
         question=question,
-        sql=sql,
+        sql=sql or "",
         sql_explanation="",
         columns=[],
         rows=[],

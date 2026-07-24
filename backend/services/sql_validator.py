@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
+from models.sql_schemas import TableInfo
+
 # ── Types ──────────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -73,11 +75,23 @@ def _extract_identifiers(sql: str) -> Set[str]:
     return {t.lower() for t in tokens if t.lower() not in _KEYWORDS}
 
 
+def _extract_aliases(sql: str) -> Set[str]:
+    """
+    Extract identifiers introduced by `AS <alias>` — these are query-defined
+    names (e.g. SELECT SUM(x) AS total_revenue) and must never be flagged as
+    hallucinated columns, since they don't exist in the source schema by
+    design.
+    """
+    sql_no_strings = re.sub(r"'[^']*'", " ", sql)
+    sql_no_strings = re.sub(r'"[^"]*"', " ", sql_no_strings)
+    return {m.lower() for m in re.findall(r"\bAS\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql_no_strings, re.IGNORECASE)}
+
+
 # ── Main validator ─────────────────────────────────────────────────────────────
 
 def validate_sql(
     sql: str,
-    table_info: Dict[str, "TableInfo"],   # table_name → TableInfo
+    table_info: Dict[str, TableInfo],   # table_name → TableInfo
 ) -> ValidationResult:
     """
     Validate generated SQL against the session's registered tables.
@@ -144,11 +158,13 @@ def validate_sql(
 
     # 5. Spot-check identifiers that look like column references
     # but aren't known (heuristic — avoids alias false-positives)
+    query_aliases = _extract_aliases(sql)
     identifiers = _extract_identifiers(sql)
     possible_hallucinations = (
         identifiers
         - all_known_cols
         - {t.lower() for t in all_known_tables}
+        - query_aliases
         # exclude single-letter aliases (a, b, t, s, e …)
         - {i for i in identifiers if len(i) <= 2}
     )

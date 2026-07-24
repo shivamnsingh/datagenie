@@ -38,7 +38,7 @@ export async function deleteSession(sessionId) {
  * Natural language → SQL → execute.
  * @param {string} sessionId
  * @param {string} question   - plain English question
- * @param {string} apiKey     - Anthropic API key
+ * @param {string} apiKey     - Gemini API key (optional; server can use GEMINI_API_KEY)
  */
 export async function nlQuery(sessionId, question, apiKey) {
   const res = await fetch(`${BASE}/query`, {

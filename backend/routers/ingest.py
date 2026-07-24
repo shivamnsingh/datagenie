@@ -164,7 +164,17 @@ async def upload_files(files: List[UploadFile] = File(...)):
             )
 
         file_id = str(uuid.uuid4())
+        # persist DataFrame in-memory and to disk so sessions survive reloads
         store.save(file_id, df)
+        try:
+            from pathlib import Path
+            p = Path('.data') / 'files'
+            p.mkdir(parents=True, exist_ok=True)
+            csv_path = p / f"{file_id}.csv"
+            df.to_csv(csv_path, index=False)
+        except Exception:
+            # disk persistence is best-effort; continue even if it fails
+            pass
 
         schema = build_schema_report(df, filename=upload.filename, file_id=file_id)
         schemas.append(schema)

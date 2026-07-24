@@ -11,7 +11,7 @@ An AI-powered data cleaning, SQL generation, and analysis platform. Upload your 
 | Backend | Python 3.13, FastAPI, Uvicorn |
 | SQL Engine | DuckDB |
 | Data Processing | Pandas, Scipy, NumPy |
-| AI / LLM | Groq API (LLaMA 3.3 70B) |
+| AI / LLM | Gemini API |
 | Embeddings | Voyage AI |
 | Frontend | React, Vite |
 | Validation | Pydantic v2 |
@@ -26,7 +26,7 @@ An AI-powered data cleaning, SQL generation, and analysis platform. Upload your 
 
 - Python 3.13+
 - Node.js 18+
-- A free [Groq API key](https://console.groq.com)
+- A Gemini API key (provider account)
 - (Optional) A [Voyage AI key](https://dash.voyageai.com) for better RAG quality
 
 ---
@@ -56,7 +56,8 @@ cp .env.example .env
 Edit `.env`:
 
 ```dotenv
-GROQ_API_KEY=gsk_your_groq_key_here
+GEMINI_API_KEY=gmi_your_gemini_key_here
+GEMINI_API_URL=https://api.gemini.example/v1/generate  # optional override
 VOYAGE_API_KEY=your_voyage_key_here   # optional
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
@@ -105,7 +106,7 @@ datagenie/
 │   ├── services/
 │   │   ├── schema_service.py    # column profiling & type detection
 │   │   ├── cleaning_service.py  # cleaning engine (preview + apply)
-│   │   ├── sql_service.py       # Groq NL-to-SQL pipeline
+│   │   ├── sql_service.py       # NL-to-SQL pipeline (Gemini)
 │   │   └── sql_validator.py     # SQL safety validation
 │   ├── models/
 │   │   ├── schemas.py           # Pydantic models (ingest, clean, export)
@@ -135,8 +136,7 @@ datagenie/
 - Standardization: lowercase columns, trim whitespace, drop duplicates & constants
 - Quality score before and after (0–100)
 
-### ⚡ SQL Query Engine
-- Natural language → SQL using Groq (LLaMA 3.3 70B), completely free
+- Natural language → SQL using Gemini
 - Raw SQL editor for direct queries
 - DuckDB execution engine — fast, in-memory
 - Query history per session
@@ -178,10 +178,9 @@ Full interactive docs: `http://localhost:8000/docs`
 
 ## 🔑 Getting API Keys
 
-**Groq (required, free):**
-1. Sign up at https://console.groq.com
-2. Go to API Keys → Create API Key
-3. Add to `.env` as `GROQ_API_KEY`
+**Gemini:**
+1. Obtain a Gemini API key from your provider
+2. Add to `.env` as `GEMINI_API_KEY`
 
 **Voyage AI (optional, improves RAG quality):**
 1. Sign up at https://dash.voyageai.com
@@ -205,8 +204,8 @@ app.include_router(sql.router, prefix="/api/sql", tags=["SQL"])
 app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])
 ```
 
-**`Groq API error 401: Invalid API Key`**  
-Regenerate your key at https://console.groq.com and update `.env`.
+**`LLM provider error 401: Invalid API Key`**
+Regenerate your key at your LLM provider and update `.env`.
 
 **Frontend not starting with `npm start`**  
 This project uses Vite. Use `npm run dev` instead.

@@ -6,7 +6,7 @@
 //
 // Props:
 //   cleanFileIds  — [{file_id, filename}]  from cleaning step
-//   apiKey        — Anthropic API key string
+//   apiKey        — Gemini API key string (optional)
 
 import { useState, useRef, useEffect } from "react";
 import { buildIndex, ragChat } from "../services/ragApi";
@@ -30,37 +30,23 @@ const FALLBACK_QUESTIONS = [
   "What does a typical row look like?",
 ];
 
-// Generate smart starter questions from actual column names via Groq API
-async function generateStarterQuestions(tableSchemas, apiKey) {
-  if (!apiKey) return FALLBACK_QUESTIONS;
+// Generate starter questions heuristically from column names (no external LLM call)
+function generateStarterQuestions(tableSchemas) {
+  const cols = Object.values(tableSchemas).flat();
+  if (!cols || cols.length === 0) return FALLBACK_QUESTIONS;
 
-  const schemaText = Object.entries(tableSchemas)
-    .map(([table, cols]) => `Table "${table}" has columns: ${cols.join(", ")}`)
-    .join("\n");
+  const suggestions = new Set();
+  // common heuristics
+  if (cols.some(c => /price|amount|revenue|total/i.test(c))) suggestions.add("Show top 10 products by revenue");
+  if (cols.some(c => /date|year|month|timestamp/i.test(c))) suggestions.add("Monthly trend of key metric");
+  if (cols.some(c => /customer|user|client/i.test(c))) suggestions.add("Top customers by spending");
+  if (cols.some(c => /region|country|state|city/i.test(c))) suggestions.add("Sales by region");
+  if (cols.some(c => /category|type|segment/i.test(c))) suggestions.add("Breakdown by category");
+  if (cols.length > 5) suggestions.add("Show a summary of this dataset");
 
-  try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        max_tokens: 300,
-        messages: [{
-          role: "user",
-          content: `Given this dataset schema:\n${schemaText}\n\nGenerate exactly 6 short, specific, useful questions a data analyst would ask about this data. Return only a JSON array of 6 strings, no explanation, no markdown.`,
-        }],
-      }),
-    });
-    const data = await res.json();
-    const text = data.choices[0].message.content.replace(/```json|```/g, "").trim();
-    const questions = JSON.parse(text);
-    return Array.isArray(questions) ? questions.slice(0, 6) : FALLBACK_QUESTIONS;
-  } catch {
-    return FALLBACK_QUESTIONS;
-  }
+  const out = Array.from(suggestions).slice(0, 6);
+  while (out.length < 6) out.push(FALLBACK_QUESTIONS[out.length]);
+  return out;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -349,7 +335,7 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [starterQuestions, setStarterQuestions] = useState(FALLBACK_QUESTIONS);
-  // Maintain conversation history in Claude API format
+  // Maintain conversation history in simple role/content format
   const [history, setHistory] = useState([]);
   const bottomRef = useRef(null);
 

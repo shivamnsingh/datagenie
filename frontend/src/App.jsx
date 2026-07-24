@@ -19,7 +19,7 @@ const STAGES = [
 export default function App() {
   const [stage, setStage] = useState("clean");
   const [apiKey, setApiKey] = useState(
-    import.meta.env?.VITE_ANTHROPIC_KEY || ""
+    import.meta.env?.VITE_GEMINI_KEY || ""
   );
   const [showApiKey, setShowApiKey] = useState(false);
 
@@ -86,7 +86,7 @@ export default function App() {
                 type={showApiKey ? "text" : "password"}
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
-                placeholder="gsk_… Groq API key"
+                placeholder="gmi_… Gemini API key"
                 className="w-44 bg-gray-900 border border-gray-700 focus:border-cyan-700 rounded-lg px-3 py-1.5 text-xs font-mono text-gray-300 outline-none transition-colors"
               />
               <button

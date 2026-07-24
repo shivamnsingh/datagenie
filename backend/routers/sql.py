@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException
-from cachetools import TTLCache
+from memory.history import QueryHistoryStore
 
 from models.sql_schemas import (
     NLQueryRequest,
@@ -26,9 +26,8 @@ from utils.session_store import store as df_store
 
 router = APIRouter()
 
-# Bounded + auto-expiring, matching duck_store's lifecycle (session_id keys are
-# 1:1 with DuckDB sessions) so query history doesn't accumulate forever.
-_history: "TTLCache[str, list]" = TTLCache(maxsize=5, ttl=1800)
+# Persisted query history store
+_history_store = QueryHistoryStore()
 
 
 # -----------------------------------------------------------------------------
@@ -42,16 +41,38 @@ def create_session(req: RegisterTablesRequest):
     for table in req.tables:
         df = df_store.load(table.file_id, copy=False)
 
+        # If the DataFrame isn't in the in-memory cache, try loading a persisted
+        # CSV written at ingest time at `.data/files/{file_id}.csv`. This makes
+        # session creation robust to process restarts or reloads.
         if df is None:
-            duck_store.delete(session.session_id)
-            raise HTTPException(
-                status_code=404,
-                detail=f"File '{table.file_id}' not found."
-            )
+            try:
+                from pathlib import Path
+                import pandas as pd
+                p = Path('.data') / 'files' / f"{table.file_id}.csv"
+                if p.exists():
+                    df = pd.read_csv(p)
+                    df_store.save(table.file_id, df)
+                else:
+                    duck_store.delete(session.session_id)
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"File '{table.file_id}' not found."
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                duck_store.delete(session.session_id)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to load file '{table.file_id}'."
+                )
 
         session.register(table.table_name, df, table.file_id)
 
-    _history[session.session_id] = []
+    # persist initial session history via the QueryHistoryStore (no in-memory history)
+    # historically we used an in-memory _history; keep compatibility by ensuring
+    # the persisted store has no items for this session yet.
+    # (No-op — QueryHistoryStore will create entries on first add.)
 
     return session.to_session_info()
 
@@ -92,45 +113,20 @@ async def nl_query(
             detail="Session not found."
         )
 
-    # -------------------------------------------------------------------------
-    # API Key
-    # -------------------------------------------------------------------------
-
-    api_key = (x_api_key or "").strip()
-
-    if not api_key:
-        raise HTTPException(
-            status_code=401,
-            detail="Please enter your Groq API key."
-        )
-
-    if not api_key.startswith("gsk_"):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid Groq API key format."
-        )
-
-    print("=" * 60)
-    print("Groq key received:", api_key[:10] + "...")
-    print("Length:", len(api_key))
-    print("=" * 60)
-
     result = await nl_to_sql_and_execute(
         question=req.question,
         session=session,
         max_rows=req.max_rows,
-        api_key=api_key,
     )
 
     if result.error is None:
-
-        _history.setdefault(req.session_id, []).append(
-            QueryHistoryItem(
-                question=req.question,
-                sql=result.sql,
-                row_count=result.row_count,
-                timestamp=datetime.utcnow().isoformat(),
-            )
+        # Persist to history store
+        _history_store.add(
+            req.session_id,
+            req.question,
+            result.sql,
+            result.execution_time_ms,
+            result.row_count,
         )
 
     return result
@@ -158,14 +154,12 @@ async def raw_query(req: SQLQueryRequest):
     )
 
     if result.error is None:
-
-        _history.setdefault(req.session_id, []).append(
-            QueryHistoryItem(
-                question=f"[RAW] {req.sql[:100]}",
-                sql=req.sql,
-                row_count=result.row_count,
-                timestamp=datetime.utcnow().isoformat(),
-            )
+        _history_store.add(
+            req.session_id,
+            f"[RAW] {req.sql[:100]}",
+            req.sql,
+            result.execution_time_ms,
+            result.row_count,
         )
 
     return result
@@ -183,10 +177,21 @@ def query_history(session_id: str):
             status_code=404,
             detail="Session not found."
         )
+    items = _history_store.list(limit=200, session_id=session_id)
+    # map to API model shape
+    history = [
+        QueryHistoryItem(
+            question=i.question,
+            sql=i.sql,
+            row_count=i.rows_returned,
+            timestamp=i.timestamp,
+        )
+        for i in items
+    ]
 
     return QueryHistoryResponse(
         session_id=session_id,
-        history=_history.get(session_id, []),
+        history=history,
     )
 
 
@@ -204,7 +209,25 @@ def delete_session(session_id: str):
         )
 
     duck_store.delete(session_id)
-    _history.pop(session_id, None)
+    # remove persisted items for this session
+    # simple approach: rewrite store without this session's items
+    remaining = [i for i in _history_store.list(limit=1000) if getattr(i, 'session_id', None) != session_id]
+    # persist remaining
+    try:
+        from pathlib import Path
+        import json
+        p = Path('.data') / 'query_history.json'
+        with p.open('w', encoding='utf-8') as f:
+            json.dump([{
+                'session_id': it.session_id,
+                'timestamp': it.timestamp,
+                'question': it.question,
+                'sql': it.sql,
+                'execution_time_ms': it.execution_time_ms,
+                'rows_returned': it.rows_returned,
+            } for it in remaining], f, indent=2)
+    except Exception:
+        pass
 
     return {
         "deleted": True,

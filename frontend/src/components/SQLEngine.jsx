@@ -3,7 +3,7 @@
 // The Text-to-SQL interface.
 // Props:
 //   cleanFileIds  — array of {file_id, filename} from the cleaning step
-//   apiKey        — Anthropic API key (string)
+//   apiKey        — Gemini API key (string)
 
 import { useState, useRef, useEffect } from "react";
 import { createSQLSession, nlQuery, rawQuery, getHistory } from "../services/sqlApi";

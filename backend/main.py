@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import ingest, clean, export, sql, rag  # ← add sql, rag
+from llm import llm_service
 
 load_dotenv()
 
@@ -47,3 +48,12 @@ def health():
 @app.get("/")
 def root():
     return {"status": "ok", "service": "DataGenie AI"}
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    """Gracefully close the global LLM service on application shutdown."""
+    try:
+        await llm_service.close()
+    except Exception:
+        pass

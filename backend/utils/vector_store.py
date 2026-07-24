@@ -1,20 +1,19 @@
 """
 utils/vector_store.py
 ──────────────────────
-Lightweight in-memory vector store using Anthropic embeddings.
+Lightweight in-memory vector store and pseudo-embedding utility.
 
-No Chroma, no FAISS, no extra dependencies.
-Uses numpy for cosine similarity — fast enough for datasets up to
-~50,000 chunks, which covers most real-world CSV use cases.
+No Chroma, no FAISS, no extra dependencies. Uses numpy for cosine
+similarity — fast enough for datasets up to ~50,000 chunks.
 
 For production scale (millions of rows), swap _search() to use
 FAISS with an IVF index — the interface stays identical.
 
 Architecture:
-  RAGIndex
-    ├── chunks: List[str]         — raw text
-    ├── sources: List[str]        — source labels
-    └── embeddings: np.ndarray    — shape (N, 1536)  [float32]
+    RAGIndex
+        ├── chunks: List[str]         — raw text
+        ├── sources: List[str]        — source labels
+        └── embeddings: np.ndarray    — shape (N, D)  [float32]
 """
 
 from __future__ import annotations
@@ -38,22 +37,11 @@ _TTL_SECONDS = 1800  # 30 minutes
 # EMBEDDING CLIENT
 # ══════════════════════════════════════════════════════════════════
 
-ANTHROPIC_EMBED_URL = "https://api.anthropic.com/v1/messages"
+VOYAGE_EMBED_URL = "https://api.voyageai.com/v1/embeddings"
 
-# We use the Claude API to generate embeddings via a neat trick:
-# Ask Claude to summarise the chunk into a fixed-size semantic vector
-# by returning a JSON array of floats. This avoids needing a separate
-# embedding model endpoint.
-#
-# *** PRODUCTION NOTE ***
-# Anthropic has a dedicated embeddings API (voyage-3). Swap to that
-# when available for your account — it's faster and cheaper:
-#   POST https://api.anthropic.com/v1/embeddings
-#   model: "voyage-3"
-#
-# For now we use a deterministic hash-based pseudo-embedding that
-# works offline, then fall back to real Claude embeddings if an
-# API key is provided.
+# This module can use deterministic pseudo-embeddings for offline/demo
+# use. Optionally configure a real embedding provider (Voyage AI) via
+# `VOYAGE_API_KEY` to get production-quality embeddings.
 
 def _pseudo_embed(text: str, dim: int = 512) -> np.ndarray:
     """
@@ -83,15 +71,15 @@ def _pseudo_embed(text: str, dim: int = 512) -> np.ndarray:
     return vec
 
 
-async def _claude_embed(text: str, api_key: str, dim: int = 512) -> np.ndarray:
+async def _voyage_embed(text: str, api_key: str, dim: int = 512) -> np.ndarray:
     """
-    Real semantic embedding via Voyage AI (Anthropic's embedding model).
+    Real semantic embedding via Voyage AI (Voyage embeddings).
     Falls back to pseudo_embed if API call fails.
     """
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
-                "https://api.voyageai.com/v1/embeddings",
+                VOYAGE_EMBED_URL,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",

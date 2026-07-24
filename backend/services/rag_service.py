@@ -1,18 +1,16 @@
-"""
-services/rag_service.py  —  Groq edition
+"""services/rag_service.py
+RAG (Retrieval-Augmented Generation) chat service.
+
+All LLM calls go through the `LLMService` abstraction backed by `GeminiProvider`.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 import re
 from typing import Dict, List, Optional, Tuple
 
-import httpx
 import numpy as np
-import pandas as pd
 
 from models.rag_schemas import (
     BuildIndexResponse,
@@ -27,8 +25,7 @@ from utils.vector_store import (
     vector_store,
 )
 
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL   = "llama-3.3-70b-versatile"
+from llm import llm_service
 
 
 async def _embed_batch(texts: List[str], api_key: str) -> np.ndarray:
@@ -128,28 +125,23 @@ async def rag_chat(
         return _error_response(rag_session_id, question, "No relevant context found.")
 
     system_prompt = _build_rag_system_prompt(retrieved)
-    messages = [
-        {"role": "system", "content": system_prompt},
-        *conversation_history[-6:],
-        {"role": "user", "content": question},
-    ]
 
-    groq_key = api_key or os.getenv("GROQ_API_KEY", "")
+    # Build a single prompt string the Gemini provider can consume.
+    convo_lines = []
+    for m in conversation_history[-6:]:
+        role = m.get("role", "user")
+        content = m.get("content") or m.get("message") or ""
+        convo_lines.append(f"{role.upper()}: {content}")
+    convo_text = "\n".join(convo_lines)
+
+    prompt = system_prompt + "\n\n" + convo_text + "\n\nUSER: " + question
+
     try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            resp = await client.post(
-                GROQ_API_URL,
-                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                json={"model": GROQ_MODEL, "max_tokens": 1500, "messages": messages},
-            )
-            resp.raise_for_status()
-            raw = resp.json()["choices"][0]["message"]["content"]
-    except httpx.HTTPStatusError as e:
-        return _error_response(rag_session_id, question, f"Groq error {e.response.status_code}: {e.response.text}")
+        raw = await llm_service.generate_raw(prompt, temperature=0.0, max_tokens=1500)
     except Exception as e:
-        return _error_response(rag_session_id, question, f"API call failed: {e}")
+        return _error_response(rag_session_id, question, f"LLM provider error: {e}")
 
-    # Aggressively extract JSON — Groq sometimes wraps it in text/markdown
+    # Aggressively extract JSON — provider may wrap it in markdown
     raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
 
     # Try direct parse first
@@ -157,7 +149,6 @@ async def rag_chat(
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        # Try to find a JSON object anywhere in the response
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         if match:
             try:
@@ -165,7 +156,6 @@ async def rag_chat(
             except json.JSONDecodeError:
                 pass
 
-    # Final fallback — treat entire response as plain answer
     if data is None:
         data = {
             "answer": raw,
@@ -173,6 +163,8 @@ async def rag_chat(
             "suggested_sql": "",
             "follow_up_questions": [],
         }
+
+    # provider is centrally managed; no-op here
 
     source_chunks = [
         SourceChunk(content=text[:300] + ("..." if len(text) > 300 else ""), source=source, relevance_score=round(score, 3))

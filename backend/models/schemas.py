@@ -148,6 +148,64 @@ class CleaningResult(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════
+# ENHANCED CLEANING REPORTS
+# ══════════════════════════════════════════════════════════════════
+
+
+class ColumnAnalysis(BaseModel):
+    name: str
+    dtype: str
+    null_count: int
+    null_pct: float
+    unique_count: int
+    cardinality: float  # unique / non-null
+    inferred_semantic: str  # date, id, email, currency, category, text, numeric
+    sample_values: List[Any]
+    has_outliers: Optional[bool] = None
+    outlier_count: Optional[int] = None
+    memory_bytes: Optional[int] = None
+
+
+class CleaningReport(BaseModel):
+    file_id: str
+    filename: str
+    row_count: int
+    col_count: int
+    quality_score: float
+    memory_mb: float
+    duplicates: int
+    duplicate_pct: float
+    missing_values: int
+    missing_pct: float
+    columns: List[ColumnAnalysis]
+    generated_at: str
+
+
+# ══════════════════════════════════════════════════════════════════
+# DATASET UNDERSTANDING
+# ══════════════════════════════════════════════════════════════════
+
+
+class DatasetUnderstanding(BaseModel):
+    file_id: str
+    title: str
+    business_domain: Optional[str]
+    description: Optional[str]
+    row_count: int
+    col_count: int
+    numeric_columns: List[str]
+    categorical_columns: List[str]
+    date_columns: List[str]
+    target_candidates: List[str]
+    suggested_kpis: List[str]
+    interesting_relationships: List[str]
+    business_insights: List[str]
+    recommended_analyses: List[str]
+    suggested_questions: List[str]
+    generated_at: str
+
+
+# ══════════════════════════════════════════════════════════════════
 # EXPORT
 # ══════════════════════════════════════════════════════════════════
 

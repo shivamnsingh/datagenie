@@ -1,0 +1,11 @@
+product,region,sales,date,category
+Widget A,North,100,2024-01-05,Gadgets
+Widget B,South,150,2024-02-12,Gadgets
+Widget C,East,200,2024-02-25,Widgets
+Widget D,West,50,2024-03-01,Widgets
+Widget A,North,120,2024-03-15,Gadgets
+Widget B,South,130,2024-04-01,Gadgets
+Widget C,East,,2024-04-12,Widgets
+Widget D,West,70,2024-05-03,Widgets
+Widget E,North,300,2024-05-20,Accessories
+Widget F,South,80,2024-06-01,Accessories

@@ -29,8 +29,11 @@ from models.schemas import (
     NullConfig,
     OutlierConfig,
     StandardizationConfig,
+    CleaningReport,
+    ColumnAnalysis,
 )
 from utils.session_store import store
+from services.schema_service import _sample_values
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -71,6 +74,83 @@ def _quality_score(df: pd.DataFrame) -> float:
     type_score = 20 * max(0, 1 - bad / max(len(obj_cols), 1))
 
     return round(completeness + uniqueness + type_score, 1)
+
+
+def _infer_semantic_type(series: pd.Series) -> str:
+    s = series.dropna()
+    if s.empty:
+        return "text"
+
+    # numeric
+    if pd.api.types.is_numeric_dtype(series):
+        return "numeric"
+
+    # datetime
+    try:
+        parsed = pd.to_datetime(s.head(50), errors="coerce")
+        if parsed.notna().mean() > 0.8:
+            return "date"
+    except Exception:
+        pass
+
+    # email
+    if s.astype(str).str.contains(r"^[^@\s]+@[^@\s]+\.[^@\s]+$").mean() > 0.8:
+        return "email"
+
+    # currency (contains $ or numeric with 2 decimals)
+    if s.astype(str).str.contains(r"^\$?\d+[\.,]?\d{0,2}").mean() > 0.8:
+        return "currency"
+
+    # id-like
+    if s.astype(str).str.match(r"^[A-Za-z0-9_\-]{6,}$").mean() > 0.9:
+        return "id"
+
+    # categorical if low cardinality
+    non_null = len(s)
+    uniques = s.nunique()
+    if non_null > 0 and (uniques / non_null) < 0.05:
+        return "category"
+
+    return "text"
+
+
+def _column_profile(series: pd.Series) -> ColumnAnalysis:
+    name = series.name
+    dtype = str(series.dtype)
+    non_null = series.notna().sum()
+    null_count = int(series.isna().sum())
+    null_pct = round(null_count / max(len(series), 1) * 100, 2)
+    unique_count = int(series.nunique(dropna=True))
+    cardinality = round(unique_count / max(non_null, 1), 4)
+    inferred = _infer_semantic_type(series)
+    sample_values = _sample_values(series)
+
+    # outlier detection for numeric
+    has_outliers = None
+    outlier_count = None
+    if pd.api.types.is_numeric_dtype(series):
+        vals = series.dropna()
+        if len(vals) >= 5:
+            lo, hi = _iqr_bounds(vals)
+            mask = (series < lo) | (series > hi)
+            outlier_count = int(mask.sum())
+            has_outliers = outlier_count > 0
+
+    mem = int(series.memory_usage(deep=True))
+
+    return ColumnAnalysis(
+        name=name,
+        dtype=dtype,
+        null_count=null_count,
+        null_pct=null_pct,
+        unique_count=unique_count,
+        cardinality=cardinality,
+        inferred_semantic=inferred,
+        sample_values=sample_values,
+        has_outliers=has_outliers,
+        outlier_count=outlier_count,
+        memory_bytes=mem,
+    )
 
 
 def _iqr_bounds(series: pd.Series) -> Tuple[float, float]:
@@ -452,6 +532,73 @@ def apply_cleaning(config: CleaningConfig) -> CleaningResult:
         df, step = _apply_outlier(df, oc)
         all_steps.append(step)
 
+    # Additional profiling and cleaning-report generation (non-breaking)
+    # Trim whitespace and normalize case if requested
+    if config.standardization.trim_whitespace:
+        for col in df.select_dtypes(include=["object"]).columns:
+            df[col] = df[col].astype(str).str.strip()
+
+    if config.standardization.lowercase_columns:
+        for col in df.select_dtypes(include=["object"]).columns:
+            df[col] = df[col].apply(lambda v: v.lower() if isinstance(v, str) else v)
+
+    # Memory optimization: downcast numeric columns
+    for col in df.select_dtypes(include=["number"]).columns:
+        try:
+            df[col] = pd.to_numeric(df[col], downcast="integer")
+            df[col] = pd.to_numeric(df[col], downcast="float")
+        except Exception:
+            pass
+
+    # Build CleaningReport and attach to warnings via store (non-breaking)
+    columns_analysis = [_column_profile(df[c]) for c in df.columns]
+    dup_count = int(df.duplicated().sum())
+    missing_values = int(df.isna().sum().sum())
+    quality_after = _quality_score(df)
+    memory_mb = round(df.memory_usage(deep=False).sum() / 1e6, 3)
+
+    from datetime import datetime
+
+    # Save under new ID early so dataset_service can reference it
+    clean_file_id = str(uuid.uuid4())
+    store.save(clean_file_id, df)
+
+    cleaning_report = CleaningReport(
+        file_id=clean_file_id,
+        filename=str(config.file_id),
+        row_count=len(df),
+        col_count=len(df.columns),
+        quality_score=quality_after,
+        memory_mb=memory_mb,
+        duplicates=dup_count,
+        duplicate_pct=round(dup_count / max(len(df), 1) * 100, 2),
+        missing_values=missing_values,
+        missing_pct=round(missing_values / max(df.size, 1) * 100, 2),
+        columns=columns_analysis,
+        generated_at=datetime.utcnow().isoformat() + "Z",
+    )
+
+    # Persist report to .data/reports/{file_id}.json for caching
+    try:
+        import json
+        from pathlib import Path
+        rpt_dir = Path('.data')
+        rpt_dir.mkdir(exist_ok=True)
+        with (rpt_dir / f"cleaning_report_{clean_file_id}.json").open('w', encoding='utf-8') as f:
+            json.dump(json.loads(cleaning_report.json()), f, indent=2)
+    except Exception:
+        pass
+
+    # Generate dataset understanding (cached) for downstream features
+    try:
+        from services.dataset_service import generate_dataset_understanding
+        try:
+            generate_dataset_understanding(store.load(clean_file_id, copy=False), str(config.file_id), clean_file_id)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
     rows_after = len(df)
     cols_after = len(df.columns)
     quality_after = _quality_score(df)
@@ -460,10 +607,7 @@ def apply_cleaning(config: CleaningConfig) -> CleaningResult:
     if pct_dropped > 10:
         warnings.append(f"⚠️ {pct_dropped:.1f}% of rows were removed during cleaning.")
 
-    # Save under new ID
-    clean_file_id = str(uuid.uuid4())
-    store.save(clean_file_id, df)
-
+    # df already saved earlier to store as clean_file_id
     del df
     gc.collect()
 
