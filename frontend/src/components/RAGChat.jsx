@@ -11,14 +11,97 @@
 import { useState, useRef, useEffect } from "react";
 import { buildIndex, ragChat } from "../services/ragApi";
 
+// ── Inline icons (SF Symbols-style: thin stroke, monochrome, no fill) ──────────
+
+function IconCheck(props) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 10.5 8 14.5 16 6" />
+    </svg>
+  );
+}
+
+function IconWarning(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M10 2.5 18 16.5H2L10 2.5Z" />
+      <path d="M10 8v3.5" />
+      <circle cx="10" cy="14" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function IconBrain(props) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M7.5 4.5a2.3 2.3 0 0 0-2.3 2.3v.4A2.3 2.3 0 0 0 4 9.3v1.4a2.3 2.3 0 0 0 1.4 2.1v.4A2.3 2.3 0 0 0 7.7 15.5" />
+      <path d="M12.5 4.5a2.3 2.3 0 0 1 2.3 2.3v.4A2.3 2.3 0 0 1 16 9.3v1.4a2.3 2.3 0 0 1-1.4 2.1v.4a2.3 2.3 0 0 1-2.3 2.3" />
+      <path d="M10 4.8v10.9" />
+    </svg>
+  );
+}
+
+function IconBars(props) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 16.5V11M10 16.5V4M16 16.5v-8" />
+    </svg>
+  );
+}
+
+function IconSearch(props) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="8.5" cy="8.5" r="5" />
+      <path d="M15.5 15.5 12.3 12.3" />
+    </svg>
+  );
+}
+
+function IconTrend(props) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M3 14.5 8 9l3.5 3 5.5-6.5" />
+      <path d="M13.5 5h3.5v3.5" />
+    </svg>
+  );
+}
+
+function IconBulb(props) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M10 2.5a4.5 4.5 0 0 0-2.5 8.25c.4.3.6.75.6 1.25v.5h4v-.5c0-.5.2-.95.6-1.25A4.5 4.5 0 0 0 10 2.5Z" />
+      <path d="M8.3 15.5h3.4M8.8 17.3h2.4" />
+    </svg>
+  );
+}
+
+function IconQuestion(props) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="M7.8 8a2.2 2.2 0 1 1 3.4 1.8c-.7.5-1.2.9-1.2 1.7" />
+      <circle cx="10" cy="13.9" r="0.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const INSIGHT_CONFIG = {
-  descriptive:   { label: "What happened",    color: "cyan",   icon: "📊" },
-  diagnostic:    { label: "Why it happened",  color: "yellow", icon: "🔍" },
-  predictive:    { label: "What might happen",color: "purple", icon: "🔮" },
-  prescriptive:  { label: "What to do",       color: "green",  icon: "💡" },
-  clarification: { label: "Clarification",    color: "gray",   icon: "❓" },
+  descriptive:   { label: "What happened",     color: "blue",    Icon: IconBars },
+  diagnostic:    { label: "Why it happened",   color: "amber",   Icon: IconSearch },
+  predictive:    { label: "What might happen", color: "neutral", Icon: IconTrend },
+  prescriptive:  { label: "What to do",        color: "emerald", Icon: IconBulb },
+  clarification: { label: "Clarification",     color: "neutral", Icon: IconQuestion },
 };
 
 const FALLBACK_QUESTIONS = [
@@ -51,17 +134,16 @@ function generateStarterQuestions(tableSchemas) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function Badge({ children, color = "cyan" }) {
+function Badge({ children, color = "neutral" }) {
   const map = {
-    cyan:   "bg-cyan-900/40 text-cyan-400 border-cyan-800",
-    green:  "bg-emerald-900/40 text-emerald-400 border-emerald-800",
-    yellow: "bg-yellow-900/40 text-yellow-400 border-yellow-800",
-    red:    "bg-red-900/40 text-red-400 border-red-800",
-    purple: "bg-purple-900/40 text-purple-400 border-purple-800",
-    gray:   "bg-gray-800 text-gray-400 border-gray-700",
+    neutral: "bg-gray-800/60 text-gray-300 border-gray-700",
+    emerald: "bg-emerald-950/30 text-emerald-400 border-emerald-900",
+    amber:   "bg-amber-950/30 text-amber-400 border-amber-900",
+    red:     "bg-red-950/40 text-red-400 border-red-900",
+    blue:    "bg-blue-950/30 text-blue-400 border-blue-900",
   };
   return (
-    <span className={`text-xs px-2 py-0.5 rounded border font-mono ${map[color]}`}>
+    <span className={`text-[11px] px-1.5 py-0.5 rounded border font-mono ${map[color]}`}>
       {children}
     </span>
   );
@@ -69,11 +151,11 @@ function Badge({ children, color = "cyan" }) {
 
 function TypingDots() {
   return (
-    <div className="flex gap-1 items-center h-5">
+    <div className="flex gap-1.5 items-center h-5">
       {[0, 1, 2].map(i => (
         <div
           key={i}
-          className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-bounce"
+          className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse"
           style={{ animationDelay: `${i * 120}ms` }}
         />
       ))}
@@ -88,10 +170,10 @@ function SourceCitations({ chunks }) {
   if (!chunks || chunks.length === 0) return null;
 
   return (
-    <div className="mt-3 border-t border-gray-800/60 pt-3">
+    <div className="mt-3 border-t border-gray-800/70 pt-3">
       <button
         onClick={() => setExpanded(e => !e)}
-        className="text-xs text-gray-500 hover:text-gray-400 flex items-center gap-1 transition-colors">
+        className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-sm">
         <span>{expanded ? "▼" : "▶"}</span>
         {chunks.length} source{chunks.length > 1 ? "s" : ""} retrieved
       </button>
@@ -99,12 +181,12 @@ function SourceCitations({ chunks }) {
       {expanded && (
         <div className="mt-2 space-y-2">
           {chunks.map((chunk, i) => (
-            <div key={i} className="bg-gray-950/60 rounded-lg p-3 border border-gray-800/50">
+            <div key={i} className="bg-gray-950/60 rounded-md p-3 border border-gray-800/60">
               <div className="flex items-center gap-2 mb-1.5">
-                <span className="text-xs font-mono text-cyan-600">{chunk.source}</span>
-                <span className={`text-xs px-1.5 py-0.5 rounded font-mono
+                <span className="text-xs font-mono text-gray-400">{chunk.source}</span>
+                <span className={`text-[11px] px-1.5 py-0.5 rounded font-mono
                   ${chunk.relevance_score > 0.6 ? "text-emerald-400 bg-emerald-950/40" :
-                    chunk.relevance_score > 0.3 ? "text-yellow-400 bg-yellow-950/40" :
+                    chunk.relevance_score > 0.3 ? "text-amber-400 bg-amber-950/40" :
                     "text-gray-500 bg-gray-900"}`}>
                   {Math.round(chunk.relevance_score * 100)}% match
                 </span>
@@ -127,13 +209,13 @@ function SuggestedSQL({ sql }) {
   if (!sql) return null;
 
   return (
-    <div className="mt-3 bg-gray-950 rounded-xl border border-gray-800 overflow-hidden">
+    <div className="mt-3 bg-gray-950 rounded-lg border border-gray-800 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800">
-        <span className="text-xs font-mono text-cyan-600">💡 suggested SQL query</span>
+        <span className="text-[11px] font-mono uppercase tracking-wide text-gray-500">Suggested SQL</span>
         <button
           onClick={() => { navigator.clipboard.writeText(sql); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-          className="text-xs text-gray-600 hover:text-cyan-500 transition-colors">
-          {copied ? "✓ copied" : "copy"}
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-sm">
+          {copied ? (<><IconCheck className="text-emerald-400" /> copied</>) : "copy"}
         </button>
       </div>
       <pre className="px-3 py-2 text-xs font-mono text-gray-400 overflow-x-auto leading-relaxed">
@@ -149,8 +231,8 @@ function Message({ msg, onFollowUp }) {
   if (msg.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-2xl bg-purple-900/25 border border-purple-800/40 rounded-2xl rounded-tr-sm px-4 py-3">
-          <p className="text-white text-sm leading-relaxed">{msg.content}</p>
+        <div className="max-w-2xl bg-gray-800 border border-gray-700 rounded-lg px-3.5 py-2.5">
+          <p className="text-gray-100 text-sm leading-relaxed">{msg.content}</p>
         </div>
       </div>
     );
@@ -159,10 +241,10 @@ function Message({ msg, onFollowUp }) {
   if (msg.role === "loading") {
     return (
       <div className="flex gap-3">
-        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-cyan-900/50 to-purple-900/50 border border-cyan-800/50 flex items-center justify-center flex-shrink-0 text-sm">
-          🧠
+        <div className="w-7 h-7 rounded-md bg-gray-900 border border-gray-800 flex items-center justify-center flex-shrink-0">
+          <IconBrain className="text-blue-400" />
         </div>
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl rounded-tl-sm px-4 py-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg px-3.5 py-2.5">
           <TypingDots />
         </div>
       </div>
@@ -172,8 +254,10 @@ function Message({ msg, onFollowUp }) {
   if (msg.role === "error") {
     return (
       <div className="flex gap-3">
-        <div className="w-8 h-8 rounded-xl bg-red-900/30 border border-red-800 flex items-center justify-center flex-shrink-0 text-sm">⚠</div>
-        <div className="bg-red-950/20 border border-red-900/40 rounded-2xl rounded-tl-sm px-4 py-3 max-w-2xl">
+        <div className="w-7 h-7 rounded-md bg-red-950/40 border border-red-900 flex items-center justify-center flex-shrink-0">
+          <IconWarning className="text-red-400" />
+        </div>
+        <div className="bg-red-950/20 border border-red-900/50 rounded-lg px-3.5 py-2.5 max-w-2xl">
           <p className="text-red-400 text-sm">{msg.content}</p>
         </div>
       </div>
@@ -186,16 +270,20 @@ function Message({ msg, onFollowUp }) {
 
   return (
     <div className="flex gap-3">
-      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-cyan-900/50 to-purple-900/50 border border-cyan-800/50 flex items-center justify-center flex-shrink-0 text-sm">
-        🧠
+      <div className="w-7 h-7 rounded-md bg-gray-900 border border-gray-800 flex items-center justify-center flex-shrink-0">
+        <IconBrain className="text-blue-400" />
       </div>
       <div className="flex-1 max-w-3xl space-y-2">
         {/* Answer bubble */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl rounded-tl-sm px-4 py-4">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg px-3.5 py-3.5">
           {/* Insight type badge */}
-          <div className="flex items-center gap-2 mb-3">
-            <span>{insight.icon}</span>
-            <Badge color={insight.color}>{insight.label}</Badge>
+          <div className="flex items-center gap-1.5 mb-3">
+            <Badge color={insight.color}>
+              <span className="inline-flex items-center gap-1">
+                <insight.Icon />
+                {insight.label}
+              </span>
+            </Badge>
           </div>
 
           {/* Answer text - render line breaks and bullets */}
@@ -204,7 +292,7 @@ function Message({ msg, onFollowUp }) {
               const isBullet = line.trim().startsWith("*") || line.trim().startsWith("+") || line.trim().startsWith("-");
               const text = line.replace(/^\s*[\*\+\-]\s*/, "").replace(/\*\*(.*?)\*\*/g, "$1");
               return isBullet
-                ? <div key={i} className="flex gap-2 ml-2"><span className="text-cyan-500 mt-0.5">•</span><span>{text}</span></div>
+                ? <div key={i} className="flex gap-2 ml-2"><span className="text-gray-500 mt-0.5">•</span><span>{text}</span></div>
                 : <p key={i}>{text}</p>;
             })}
           </div>
@@ -218,12 +306,12 @@ function Message({ msg, onFollowUp }) {
 
         {/* Follow-up chips */}
         {response.follow_up_questions && response.follow_up_questions.length > 0 && (
-          <div className="flex flex-wrap gap-2 pl-1">
+          <div className="flex flex-wrap gap-1.5 pl-1">
             {response.follow_up_questions.map((q, i) => (
               <button
                 key={i}
                 onClick={() => onFollowUp(q)}
-                className="text-xs px-3 py-1.5 rounded-full border border-gray-700 text-gray-400 hover:border-cyan-700 hover:text-cyan-400 hover:bg-cyan-950/20 transition-all">
+                className="text-xs px-2.5 py-1 rounded-md border border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
                 {q}
               </button>
             ))}
@@ -272,9 +360,13 @@ function IndexBuilder({ cleanFileIds, apiKey, onReady }) {
 
   return (
     <div className="max-w-lg mx-auto text-center space-y-6 py-8">
-      <div className="text-5xl">🧠</div>
+      <div className="flex justify-center">
+        <span className="w-11 h-11 rounded-lg bg-gray-900 border border-gray-800 flex items-center justify-center">
+          <IconBrain className="text-blue-400" width="22" height="22" />
+        </span>
+      </div>
       <div>
-        <h3 className="text-xl font-black text-white">Build RAG Index</h3>
+        <h3 className="text-lg font-semibold text-gray-50">Build RAG Index</h3>
         <p className="text-gray-500 text-sm mt-2 leading-relaxed">
           Your data will be chunked, embedded, and indexed so you can ask
           freeform questions beyond what SQL can answer.
@@ -282,10 +374,10 @@ function IndexBuilder({ cleanFileIds, apiKey, onReady }) {
       </div>
 
       {/* Files to be indexed */}
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-left space-y-2">
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 text-left space-y-2">
         {cleanFileIds.map(({ file_id, filename }) => (
-          <div key={file_id} className="flex items-center gap-3">
-            <span className="text-emerald-500 text-sm">✓</span>
+          <div key={file_id} className="flex items-center gap-2.5">
+            <IconCheck className="text-emerald-400 flex-shrink-0" />
             <span className="text-sm font-mono text-gray-300">{filename}</span>
           </div>
         ))}
@@ -296,21 +388,21 @@ function IndexBuilder({ cleanFileIds, apiKey, onReady }) {
         <div>
           <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full transition-all duration-300"
+              className="h-full bg-blue-500 rounded-full transition-all duration-300 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
-          <p className="text-xs text-gray-500 mt-2 font-mono animate-pulse">
-            {progress < 30 ? "Chunking data..." :
-             progress < 60 ? "Generating embeddings..." :
-             progress < 90 ? "Building vector index..." :
-             "Finalising..."}
+          <p className="text-xs text-gray-500 mt-2 font-mono">
+            {progress < 30 ? "Chunking data…" :
+             progress < 60 ? "Generating embeddings…" :
+             progress < 90 ? "Building vector index…" :
+             "Finalising…"}
           </p>
         </div>
       )}
 
       {error && (
-        <div className="p-3 rounded-xl bg-red-900/20 border border-red-800 text-red-400 text-sm">
+        <div className="p-3 rounded-lg bg-red-950/30 border border-red-900 text-red-400 text-sm">
           {error}
         </div>
       )}
@@ -318,8 +410,8 @@ function IndexBuilder({ cleanFileIds, apiKey, onReady }) {
       {!building && (
         <button
           onClick={start}
-          className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-purple-600 hover:opacity-90 text-white font-bold text-sm transition-opacity">
-          ⚡ Build Index & Start Chatting
+          className="w-full h-11 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+          Build Index & Start Chatting
         </button>
       )}
     </div>
@@ -423,15 +515,18 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div>
-          <div className="text-lg font-black text-white">🧠 RAG Data Chat</div>
+          <div className="flex items-center gap-1.5 text-base font-semibold text-gray-50">
+            <IconBrain className="text-gray-500" />
+            RAG Data Chat
+          </div>
           <div className="text-xs font-mono text-gray-500 mt-0.5">
-            <span className="text-cyan-600">{indexInfo?.chunks_indexed}</span> chunks indexed ·{" "}
-            <span className="text-purple-500">{indexInfo?.tables_indexed?.join(", ")}</span>
+            <span className="text-gray-300 tabular-nums">{indexInfo?.chunks_indexed}</span> chunks indexed ·{" "}
+            <span className="text-gray-300">{indexInfo?.tables_indexed?.join(", ")}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs text-emerald-500 font-mono">RAG ACTIVE</span>
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+          <span className="text-xs text-emerald-500 font-mono">RAG active</span>
         </div>
       </div>
 
@@ -445,12 +540,12 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
 
       {/* Starter prompts (only if just started) */}
       {messages.length <= 1 && (
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-wrap gap-1.5 mb-3">
           {starterQuestions.map(q => (
             <button
               key={q}
               onClick={() => sendMessage(q)}
-              className="text-xs px-3 py-1.5 rounded-full border border-gray-700 text-gray-400 hover:border-purple-700 hover:text-purple-400 hover:bg-purple-950/20 transition-all">
+              className="text-xs px-2.5 py-1 rounded-md border border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
               {q}
             </button>
           ))}
@@ -464,13 +559,13 @@ export default function RAGChat({ cleanFileIds = [], apiKey = "" }) {
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
           placeholder='Ask anything… "Why is sales declining in Q3?" · "What drives revenue?"'
-          className="flex-1 bg-gray-900 border border-gray-800 focus:border-purple-600 rounded-xl px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-gray-600"
+          className="flex-1 h-11 bg-gray-900 border border-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:border-gray-700 rounded-lg px-3.5 text-sm text-gray-100 transition-colors duration-150 ease-out placeholder:text-gray-600"
           disabled={loading}
         />
         <button
           onClick={() => sendMessage()}
           disabled={loading || !input.trim()}
-          className="px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-purple-600 hover:opacity-90 disabled:opacity-40 text-white font-bold text-sm transition-opacity">
+          className="px-5 h-11 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium text-sm transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
           →
         </button>
       </div>

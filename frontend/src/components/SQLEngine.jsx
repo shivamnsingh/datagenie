@@ -9,19 +9,69 @@ import { useState, useRef, useEffect } from "react";
 import { createSQLSession, nlQuery, rawQuery, getHistory } from "../services/sqlApi";
 import ChartRenderer from "./ChartRenderer";
 
+// ── Inline icons (SF Symbols-style: thin stroke, monochrome, no fill) ──────────
+
+function IconCheck(props) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 10.5 8 14.5 16 6" />
+    </svg>
+  );
+}
+
+function IconTerminal(props) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" />
+      <path d="M5.5 7.5 8.5 10l-3 2.5M10.5 12.5h4" />
+    </svg>
+  );
+}
+
+function IconMessage(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M3 4.5h14a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1H8.5L5 17v-3H3a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1Z" />
+    </svg>
+  );
+}
+
+function IconWarning(props) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M10 2.5 18 16.5H2L10 2.5Z" />
+      <path d="M10 8v3.5" />
+      <circle cx="10" cy="14" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function IconLink(props) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M8.5 11.5a3 3 0 0 0 4.24 0l2-2a3 3 0 0 0-4.24-4.24l-.9.9" />
+      <path d="M11.5 8.5a3 3 0 0 0-4.24 0l-2 2a3 3 0 0 0 4.24 4.24l.9-.9" />
+    </svg>
+  );
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function Badge({ children, color = "cyan" }) {
+function Badge({ children, color = "neutral" }) {
   const map = {
-    cyan:   "bg-cyan-900/40 text-cyan-400 border-cyan-800",
-    green:  "bg-emerald-900/40 text-emerald-400 border-emerald-800",
-    yellow: "bg-yellow-900/40 text-yellow-400 border-yellow-800",
-    red:    "bg-red-900/40 text-red-400 border-red-800",
-    purple: "bg-purple-900/40 text-purple-400 border-purple-800",
-    gray:   "bg-gray-800 text-gray-400 border-gray-700",
+    neutral: "bg-gray-800/60 text-gray-300 border-gray-700",
+    emerald: "bg-emerald-950/30 text-emerald-400 border-emerald-900",
+    amber:   "bg-amber-950/30 text-amber-400 border-amber-900",
+    red:     "bg-red-950/40 text-red-400 border-red-900",
+    blue:    "bg-blue-950/30 text-blue-400 border-blue-900",
   };
   return (
-    <span className={`text-xs px-2 py-0.5 rounded border font-mono ${map[color]}`}>
+    <span className={`text-[11px] px-1.5 py-0.5 rounded border font-mono tabular-nums ${map[color]}`}>
       {children}
     </span>
   );
@@ -29,10 +79,10 @@ function Badge({ children, color = "cyan" }) {
 
 function Spinner() {
   return (
-    <div className="flex items-center gap-2 text-cyan-400 font-mono text-sm animate-pulse">
-      <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-      <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-      <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+    <div className="flex items-center gap-1.5 text-gray-500 font-mono text-sm">
+      <div className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse" style={{ animationDelay: "0ms" }} />
+      <div className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse" style={{ animationDelay: "150ms" }} />
+      <div className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse" style={{ animationDelay: "300ms" }} />
     </div>
   );
 }
@@ -59,17 +109,17 @@ function SQLBlock({ sql }) {
     .replace(/--.*/g, '<span style="color:#8b949e;font-style:italic">$&</span>');
 
   return (
-    <div className="rounded-xl overflow-hidden border border-gray-800 my-3">
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-950 border-b border-gray-800">
-        <span className="text-xs font-mono text-cyan-500">⚡ generated SQL</span>
+    <div className="rounded-lg overflow-hidden border border-gray-800 my-3">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-gray-950 border-b border-gray-800">
+        <span className="text-[11px] font-mono uppercase tracking-wide text-gray-500">Generated SQL</span>
         <button
           onClick={copy}
-          className="text-xs font-mono text-gray-500 hover:text-cyan-400 border border-gray-700 hover:border-cyan-700 px-2 py-0.5 rounded transition-colors">
-          {copied ? "✓ copied" : "copy"}
+          className="flex items-center gap-1 text-[11px] font-mono text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-600 px-2 py-0.5 rounded transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+          {copied ? (<><IconCheck className="text-emerald-400" /> copied</>) : "copy"}
         </button>
       </div>
       <pre
-        className="p-4 text-sm font-mono leading-relaxed overflow-x-auto bg-[#0d1117]"
+        className="p-3.5 text-xs font-mono leading-relaxed overflow-x-auto bg-[#0d1117]"
         dangerouslySetInnerHTML={{ __html: highlighted }}
       />
     </div>
@@ -86,15 +136,15 @@ function ResultTable({ columns, rows, truncated, rowCount }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
-        <Badge color="green">{rowCount.toLocaleString()} rows</Badge>
-        {truncated && <Badge color="yellow">truncated at 500</Badge>}
+        <Badge color="emerald">{rowCount.toLocaleString()} rows</Badge>
+        {truncated && <Badge color="amber">truncated at 500</Badge>}
       </div>
-      <div className="overflow-auto max-h-72 rounded-xl border border-gray-800">
+      <div className="overflow-auto max-h-72 rounded-lg border border-gray-800">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-gray-950 z-10">
             <tr>
               {columns.map(c => (
-                <th key={c.name} className="px-4 py-2.5 text-left text-xs font-mono text-gray-400 border-b border-gray-800 whitespace-nowrap">
+                <th key={c.name} className="px-3.5 py-2 text-left text-[11px] font-mono text-gray-400 border-b border-gray-800 whitespace-nowrap">
                   {c.name}
                   <span className="ml-1 text-gray-600">({c.dtype})</span>
                 </th>
@@ -103,9 +153,9 @@ function ResultTable({ columns, rows, truncated, rowCount }) {
           </thead>
           <tbody>
             {rows.map((row, i) => (
-              <tr key={i} className={`border-t border-gray-800/40 ${i % 2 === 0 ? "bg-gray-900/20" : ""} hover:bg-gray-800/40`}>
+              <tr key={i} className={`border-t border-gray-800/60 ${i % 2 === 0 ? "bg-gray-900/20" : ""} hover:bg-gray-800/40 transition-colors duration-150 ease-out`}>
                 {columns.map(c => (
-                  <td key={c.name} className="px-4 py-2 text-gray-300 font-mono text-xs whitespace-nowrap">
+                  <td key={c.name} className="px-3.5 py-2 text-gray-300 font-mono text-xs tabular-nums whitespace-nowrap">
                     {row[c.name] === null || row[c.name] === undefined
                       ? <span className="text-gray-600">NULL</span>
                       : String(row[c.name])}
@@ -120,10 +170,10 @@ function ResultTable({ columns, rows, truncated, rowCount }) {
   );
 }
 
-// ── Chart icons (kept for reference)
-const VIZ_ICONS = {
-  bar: "📊", line: "📈", pie: "🥧", histogram: "📉",
-  scatter: "🔵", heatmap: "🟥", table: "📋"
+// ── Chart type reference (labels only, no emoji) ──────────────────────────────
+const VIZ_LABELS = {
+  bar: "Bar", line: "Line", pie: "Pie", histogram: "Histogram",
+  scatter: "Scatter", heatmap: "Heatmap", table: "Table"
 };
 
 // ── Chat Message ──────────────────────────────────────────────────────────────
@@ -134,8 +184,8 @@ function QueryMessage({ item }) {
   if (item.type === "user") {
     return (
       <div className="flex justify-end">
-        <div className="bg-purple-900/30 border border-purple-800/50 rounded-2xl rounded-tr-sm px-4 py-3 max-w-xl">
-          <p className="text-white text-sm">{item.text}</p>
+        <div className="bg-gray-800 border border-gray-700 rounded-lg px-3.5 py-2.5 max-w-xl">
+          <p className="text-gray-100 text-sm">{item.text}</p>
         </div>
       </div>
     );
@@ -144,8 +194,10 @@ function QueryMessage({ item }) {
   if (item.type === "error") {
     return (
       <div className="flex gap-3">
-        <div className="w-8 h-8 rounded-lg bg-red-900/30 border border-red-800 flex items-center justify-center flex-shrink-0 text-sm">⚠</div>
-        <div className="bg-red-950/30 border border-red-900/50 rounded-2xl rounded-tl-sm px-4 py-3 max-w-2xl">
+        <div className="w-7 h-7 rounded-md bg-red-950/40 border border-red-900 flex items-center justify-center flex-shrink-0">
+          <IconWarning className="text-red-400" />
+        </div>
+        <div className="bg-red-950/30 border border-red-900/50 rounded-lg px-3.5 py-2.5 max-w-2xl">
           <p className="text-red-400 text-sm">{item.text}</p>
         </div>
       </div>
@@ -156,19 +208,21 @@ function QueryMessage({ item }) {
   const { result } = item;
   return (
     <div className="flex gap-3">
-      <div className="w-8 h-8 rounded-lg bg-cyan-900/30 border border-cyan-800 flex items-center justify-center flex-shrink-0 text-sm">🤖</div>
+      <div className="w-7 h-7 rounded-md bg-gray-900 border border-gray-800 flex items-center justify-center flex-shrink-0">
+        <IconTerminal className="text-blue-400" />
+      </div>
       <div className="flex-1 max-w-3xl space-y-2">
         {/* Explanation */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl rounded-tl-sm px-4 py-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg px-3.5 py-2.5">
           <p className="text-gray-200 text-sm leading-relaxed">{result.sql_explanation}</p>
 
           <div className="flex items-center gap-2 mt-2">
             <button
               onClick={() => setShowSQL(s => !s)}
-              className="text-xs font-mono text-cyan-500 hover:text-cyan-400 transition-colors">
+              className="text-xs font-mono text-gray-400 hover:text-gray-200 transition-colors duration-150 ease-out">
               {showSQL ? "▼ hide SQL" : "▶ show SQL"}
             </button>
-            <Badge color="gray">{result.execution_time_ms}ms</Badge>
+            <Badge>{result.execution_time_ms}ms</Badge>
           </div>
 
           {showSQL && <SQLBlock sql={result.sql} />}
@@ -176,7 +230,7 @@ function QueryMessage({ item }) {
 
         {/* Results */}
         {result.rows && result.rows.length > 0 && (
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl px-4 py-3">
+          <div className="bg-gray-900 border border-gray-800 rounded-lg px-3.5 py-2.5">
             <ResultTable
               columns={result.columns}
               rows={result.rows}
@@ -202,12 +256,12 @@ function QuickPrompts({ onSelect }) {
     "Group by region and sum revenue",
   ];
   return (
-    <div className="flex flex-wrap gap-2 mb-4">
+    <div className="flex flex-wrap gap-1.5 mb-4">
       {prompts.map(p => (
         <button
           key={p}
           onClick={() => onSelect(p)}
-          className="text-xs px-3 py-1.5 rounded-full border border-gray-700 text-gray-400 hover:border-cyan-700 hover:text-cyan-400 transition-colors">
+          className="text-xs px-2.5 py-1 rounded-md border border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
           {p}
         </button>
       ))}
@@ -324,8 +378,11 @@ export default function SQLEngine({ cleanFileIds = [], apiKey = "" }) {
   if (!sessionId) {
     return (
       <div className="max-w-2xl mx-auto space-y-6">
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
-          <div className="font-bold text-white text-lg mb-1">🔗 Configure SQL Session</div>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <IconLink className="text-gray-500" />
+            <span className="font-semibold text-gray-100 text-base">Configure SQL Session</span>
+          </div>
           <div className="text-gray-500 text-sm mb-5">Name your tables — these become your SQL table names.</div>
 
           <div className="space-y-3">
@@ -336,7 +393,7 @@ export default function SQLEngine({ cleanFileIds = [], apiKey = "" }) {
                   <input
                     value={tableNames[file_id] || ""}
                     onChange={e => setTableNames(n => ({ ...n, [file_id]: e.target.value }))}
-                    className="w-full bg-gray-800 border border-gray-700 focus:border-cyan-600 rounded-lg px-3 py-2 text-sm font-mono text-cyan-400 outline-none transition-colors"
+                    className="w-full h-10 bg-gray-800 border border-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:border-gray-600 rounded-md px-3 text-sm font-mono text-gray-100 transition-colors duration-150 ease-out"
                     placeholder="table_name"
                   />
                 </div>
@@ -345,7 +402,7 @@ export default function SQLEngine({ cleanFileIds = [], apiKey = "" }) {
           </div>
 
           {initError && (
-            <div className="mt-4 p-3 rounded-xl bg-red-900/20 border border-red-800 text-red-400 text-sm">
+            <div className="mt-4 p-3 rounded-lg bg-red-950/30 border border-red-900 text-red-400 text-sm">
               {initError}
             </div>
           )}
@@ -353,8 +410,8 @@ export default function SQLEngine({ cleanFileIds = [], apiKey = "" }) {
           <button
             onClick={initSession}
             disabled={initLoading}
-            className="mt-5 w-full py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-bold text-sm transition-colors">
-            {initLoading ? "⚡ Creating session..." : "Start SQL Session →"}
+            className="mt-5 w-full h-10 rounded-md bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium text-sm transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            {initLoading ? "Creating session…" : "Start SQL Session →"}
           </button>
         </div>
       </div>
@@ -366,28 +423,31 @@ export default function SQLEngine({ cleanFileIds = [], apiKey = "" }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <div className="font-bold text-white text-lg">⚡ SQL Query Engine</div>
+          <div className="flex items-center gap-1.5 font-semibold text-gray-100 text-base">
+            <IconTerminal className="text-gray-500" />
+            SQL Query Engine
+          </div>
           <div className="text-gray-500 text-xs font-mono mt-0.5">
             {sessionInfo?.tables.map(t => (
               <span key={t.table_name} className="mr-3">
-                <span className="text-cyan-500">{t.table_name}</span>
-                <span className="text-gray-600"> ({t.row_count.toLocaleString()} rows)</span>
+                <span className="text-gray-300">{t.table_name}</span>
+                <span className="text-gray-600 tabular-nums"> ({t.row_count.toLocaleString()} rows)</span>
               </span>
             ))}
           </div>
         </div>
 
         {/* Mode toggle */}
-        <div className="flex bg-gray-900 border border-gray-800 rounded-xl p-1">
+        <div className="flex bg-gray-900 border border-gray-800 rounded-lg p-0.5">
           <button
             onClick={() => setMode("nl")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === "nl" ? "bg-cyan-600 text-white" : "text-gray-500 hover:text-white"}`}>
-            💬 Ask
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${mode === "nl" ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-200"}`}>
+            <IconMessage /> Ask
           </button>
           <button
             onClick={() => setMode("raw")}
-            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === "raw" ? "bg-cyan-600 text-white" : "text-gray-500 hover:text-white"}`}>
-            ⌨️ SQL
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${mode === "raw" ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-200"}`}>
+            <IconTerminal /> SQL
           </button>
         </div>
       </div>
@@ -397,8 +457,10 @@ export default function SQLEngine({ cleanFileIds = [], apiKey = "" }) {
         {messages.map((msg, i) => <QueryMessage key={i} item={msg} />)}
         {loading && (
           <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-lg bg-cyan-900/30 border border-cyan-800 flex items-center justify-center flex-shrink-0 text-sm">🤖</div>
-            <div className="bg-gray-900 border border-gray-800 rounded-2xl rounded-tl-sm px-4 py-3">
+            <div className="w-7 h-7 rounded-md bg-gray-900 border border-gray-800 flex items-center justify-center flex-shrink-0">
+              <IconTerminal className="text-blue-400" />
+            </div>
+            <div className="bg-gray-900 border border-gray-800 rounded-lg px-3.5 py-2.5">
               <Spinner />
             </div>
           </div>
@@ -416,13 +478,13 @@ export default function SQLEngine({ cleanFileIds = [], apiKey = "" }) {
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendQuery()}
               placeholder="Ask anything… e.g. 'Top 3 employees by total sales'"
-              className="flex-1 bg-gray-900 border border-gray-800 focus:border-cyan-600 rounded-xl px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-gray-600"
+              className="flex-1 h-11 bg-gray-900 border border-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:border-gray-700 rounded-lg px-3.5 text-sm text-gray-100 transition-colors duration-150 ease-out placeholder:text-gray-600"
               disabled={loading}
             />
             <button
               onClick={sendQuery}
               disabled={loading || !input.trim()}
-              className="px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white font-bold text-sm transition-colors">
+              className="px-5 h-11 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium text-sm transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
               →
             </button>
           </div>
@@ -434,13 +496,13 @@ export default function SQLEngine({ cleanFileIds = [], apiKey = "" }) {
             onChange={e => setRawSQL(e.target.value)}
             placeholder="SELECT * FROM sales LIMIT 10;"
             rows={4}
-            className="w-full bg-gray-900 border border-gray-800 focus:border-cyan-600 rounded-xl px-4 py-3 text-sm font-mono text-cyan-300 outline-none transition-colors placeholder:text-gray-600 resize-none"
+            className="w-full bg-gray-900 border border-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus:border-gray-700 rounded-lg px-3.5 py-3 text-sm font-mono text-gray-200 transition-colors duration-150 ease-out placeholder:text-gray-600 resize-none"
           />
           <button
             onClick={runRaw}
             disabled={loading || !rawSQL.trim()}
-            className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white font-bold text-sm transition-colors">
-            {loading ? "Running..." : "▶ Execute SQL"}
+            className="w-full h-10 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium text-sm transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            {loading ? "Running…" : "▶ Execute SQL"}
           </button>
         </div>
       )}
