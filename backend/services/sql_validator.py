@@ -33,9 +33,31 @@ class ValidationResult:
 # ── Dangerous keywords ────────────────────────────────────────────────────────
 
 _WRITE_OPS = re.compile(
-    r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|EXEC|EXECUTE)\b",
+    r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE|TRUNCATE|REPLACE\s+INTO|MERGE|EXEC|EXECUTE)\b",
     re.IGNORECASE,
 )
+
+
+def _remove_comments_and_literals(sql: str) -> str:
+    """Remove non-code SQL text before checking statement keywords."""
+    sql = re.sub(r"--[^\n]*(?=\n|$)", " ", sql)
+    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
+    sql = re.sub(r"'(?:''|[^'])*'", "''", sql)
+    sql = re.sub(r'"(?:""|[^"])*"', '""', sql)
+    return sql
+
+
+def _extract_cte_names(sql: str) -> Set[str]:
+    """Find names introduced by WITH clauses, including recursive CTEs."""
+    code = _remove_comments_and_literals(sql)
+    return {
+        name.lower()
+        for name in re.findall(
+            r"(?:\bWITH\s+(?:RECURSIVE\s+)?|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s*\(",
+            code,
+            re.IGNORECASE,
+        )
+    }
 
 # ── Token extraction ──────────────────────────────────────────────────────────
 
@@ -44,13 +66,7 @@ def _extract_identifiers(sql: str) -> Set[str]:
     Rough extraction of bare identifiers from SQL.
     Strips comments, string literals, and known keywords first.
     """
-    # Remove single-line comments
-    sql = re.sub(r"--[^\n]*", " ", sql)
-    # Remove block comments
-    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
-    # Remove string literals
-    sql = re.sub(r"'[^']*'", " ", sql)
-    sql = re.sub(r'"[^"]*"', " ", sql)
+    sql = _remove_comments_and_literals(sql)
 
     tokens = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", sql)
 
@@ -104,8 +120,12 @@ def validate_sql(
     issues: List[str] = []
     warnings: List[str] = []
 
-    # 1. Block write operations
-    write_match = _WRITE_OPS.search(sql)
+    if not sql or not sql.strip():
+        return ValidationResult(is_valid=False, issues=["Query cannot be empty."])
+
+    # 1. Block write operations outside comments and string literals.
+    code_sql = _remove_comments_and_literals(sql)
+    write_match = _WRITE_OPS.search(code_sql)
     if write_match:
         return ValidationResult(
             is_valid=False,
@@ -123,7 +143,8 @@ def validate_sql(
         )
 
     # 3. Check referenced tables exist
-    all_known_tables = set(table_info.keys())
+    all_known_tables = {name.lower() for name in table_info}
+    all_known_tables.update(_extract_cte_names(sql))
     all_known_cols: Set[str] = set()
     col_to_tables: Dict[str, List[str]] = {}
 
@@ -139,7 +160,7 @@ def validate_sql(
     )
     referenced_tables = {m.group(1).lower() for m in from_pattern.finditer(sql)}
 
-    unknown_tables = referenced_tables - {t.lower() for t in all_known_tables}
+    unknown_tables = referenced_tables - all_known_tables
     if unknown_tables:
         issues.append(
             f"Unknown table(s): {', '.join(repr(t) for t in unknown_tables)}. "

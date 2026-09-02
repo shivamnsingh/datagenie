@@ -35,7 +35,7 @@ class GeminiSettings:
 
     def __init__(self):
         self.GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
-        self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+        self.GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
         self.GEMINI_API_BASE: str = os.getenv(
             "GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta"
         )
@@ -95,8 +95,12 @@ class GeminiProvider(LLMProvider):
                 json=payload,
                 headers={"Content-Type": "application/json"},
             )
+        except httpx.TimeoutException as e:
+            raise GeminiError(
+                f"Gemini API request timed out after {self.settings.GEMINI_TIMEOUT_S:g}s"
+            ) from e
         except httpx.RequestError as e:
-            raise GeminiError(f"Failed to reach Gemini API: {e}") from e
+            raise GeminiError(f"Failed to reach Gemini API ({type(e).__name__}): {e!r}") from e
 
         if resp.status_code != 200:
             detail = self._extract_error_message(resp)
