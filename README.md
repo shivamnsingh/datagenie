@@ -1,217 +1,188 @@
-# ⚡ DataGenie AI
+# DataGenie AI
 
-An AI-powered data cleaning, SQL generation, and analysis platform. Upload your datasets, clean them interactively, query them in plain English, and get instant visualizations — all in one tool.
+DataGenie is an AI-assisted data workspace that turns raw CSV files into clean, queryable, explainable datasets. Users can upload data, inspect its quality, apply cleaning operations, ask questions in natural language, run SQL, explore visualizations, and export the result from one workflow.
 
----
+**Live application:** [datageniee.vercel.app](https://datageniee.vercel.app/)
 
-## 🧰 Tech Stack
+## Why This Project
 
-| Layer | Technology |
-|---|---|
+Data analysis often breaks down before analysis begins: datasets contain missing values, inconsistent types, duplicate records, outliers, and unclear schemas. DataGenie brings data preparation and exploration together so users can move from an uploaded CSV to a defensible answer without writing every transformation by hand.
+
+## Product Highlights
+
+- Upload one or more CSV files and receive schema, quality, null, duplicate, and outlier insights.
+- Preview cleaning changes before applying them, with before-and-after quality scores.
+- Handle missing values, outliers, type conversions, whitespace, duplicate rows, and column standardization.
+- Ask natural-language questions and translate them into SQL with Gemini.
+- Execute raw SQL against in-memory DuckDB sessions for joins, CTEs, aggregations, nested queries, and window functions.
+- Validate generated SQL before execution and block write operations such as `DROP`, `DELETE`, `INSERT`, and `UPDATE`.
+- Suggest visualizations from query results using bar, line, pie, scatter, histogram, heatmap, and table views.
+- Chat with indexed dataset context through a retrieval-augmented generation workflow.
+- Export cleaned results as CSV, JSON, or XLSX.
+
+## Engineering Highlights
+
+- **Source-grounded Text-to-SQL:** Gemini receives the active table schema and user question, then generated SQL is validated and automatically repaired when possible.
+- **Read-only query safety:** SQL validation is aware of comments, literals, CTE names, scalar functions such as `REPLACE()`, and complex read-only query structures while continuing to reject write statements.
+- **Fast local analytics:** DuckDB runs analytical SQL over registered Pandas DataFrames without requiring a separate database server.
+- **Clear service boundaries:** FastAPI routers handle HTTP contracts, service modules own business workflows, and Pydantic models define request and response schemas.
+- **Resource-conscious sessions:** DuckDB connections are bounded with a TTL cache, and uploaded data is downcast where possible to reduce memory usage.
+- **Deployment-ready configuration:** The backend supports Render environment variables and configurable CORS origins; the frontend uses a build-time API URL for Vercel deployment.
+
+## Architecture
+
+```text
+React + Vite frontend
+        |
+        | REST / JSON / multipart upload
+        v
+FastAPI backend
+  |-- Ingest and schema profiling
+  |-- Cleaning preview and apply services
+  |-- DuckDB SQL sessions
+  |-- SQL validation and repair loop
+  |-- RAG indexing and chat
+  |-- Export services
+        |
+        +--> Gemini API for natural-language analysis and SQL generation
+        +--> Optional Voyage AI embeddings for RAG
+```
+
+## Tech Stack
+
+| Area | Technology |
+| --- | --- |
+| Frontend | React 18, Vite, Recharts, Tailwind CSS |
 | Backend | Python 3.13, FastAPI, Uvicorn |
-| SQL Engine | DuckDB |
-| Data Processing | Pandas, Scipy, NumPy |
-| AI / LLM | Gemini API |
-| Embeddings | Voyage AI |
-| Frontend | React, Vite |
+| Data processing | Pandas, NumPy, SciPy |
+| SQL analytics | DuckDB |
+| AI | Google Gemini API |
+| Retrieval | Optional Voyage AI embeddings with local fallback |
 | Validation | Pydantic v2 |
-| HTTP Client | Httpx |
-| Config | Python-dotenv |
+| HTTP | HTTPX |
+| Deployment | Vercel frontend, Render backend |
 
----
+## Run Locally
 
-## 🚀 Getting Started
-
-### Prerequisites
+### Requirements
 
 - Python 3.13+
 - Node.js 18+
-- A Gemini API key (provider account)
-- (Optional) A [Voyage AI key](https://dash.voyageai.com) for better RAG quality
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+- Optional Voyage AI key for production-quality embeddings
 
----
+### Backend
 
-### 1. Clone the repository
+From the repository root:
 
-```bash
-git clone https://github.com/your-username/datagenie.git
-cd datagenie
-```
-
-### 2. Set up the backend
-
-```bash
+```powershell
 cd backend
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### 3. Configure environment variables
-
-Copy the example env file and fill in your keys:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
+Create `.env` in the repository root:
 
 ```dotenv
-GEMINI_API_KEY=gmi_your_gemini_key_here
-GEMINI_API_URL=https://api.gemini.example/v1/generate  # optional override
-VOYAGE_API_KEY=your_voyage_key_here   # optional
-BACKEND_PORT=8000
-FRONTEND_PORT=3000
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_API_BASE=https://generativelanguage.googleapis.com/v1beta
+GEMINI_TIMEOUT_S=30
+VOYAGE_API_KEY=
 ```
 
-> ⚠️ Never commit your `.env` file to version control.
+Start the API:
 
-### 4. Start the backend
-
-```bash
-cd backend
+```powershell
 uvicorn main:app --reload --port 8000
 ```
 
-Backend will be running at: `http://localhost:8000`  
-API docs available at: `http://localhost:8000/docs`
+The API is available at `http://127.0.0.1:8000` and its interactive documentation is at `http://127.0.0.1:8000/docs`.
 
-### 5. Start the frontend
+### Frontend
 
-Open a new terminal:
+In a second terminal:
 
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-Frontend will be running at: `http://localhost:5173`
+The frontend is available at `http://127.0.0.1:3000`.
 
----
+For a different backend URL, set this Vite variable before building:
 
-## 📁 Project Structure
-
+```dotenv
+VITE_API_URL=https://your-backend-url.onrender.com
 ```
+
+## Deploy
+
+### Backend on Render
+
+The repository includes [render.yaml](render.yaml). Configure these environment variables in the Render service:
+
+```text
+GEMINI_API_KEY=your_new_gemini_api_key
+GEMINI_MODEL=gemini-3.1-flash-lite
+CORS_ORIGINS=https://datageniee.vercel.app
+```
+
+Keep the Gemini key in Render's secret environment settings. Never commit it to the repository or expose it as a Vercel frontend variable.
+
+### Frontend on Vercel
+
+- Root directory: `frontend`
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variable: `VITE_API_URL=https://your-backend-url.onrender.com`
+
+After deployment, set the exact Vercel domain in the backend's `CORS_ORIGINS` value and redeploy the backend.
+
+## API Surface
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/api/ingest/upload` | Upload and profile CSV files |
+| GET | `/api/ingest/preview/{file_id}` | Preview uploaded data |
+| POST | `/api/clean/preview` | Preview cleaning changes |
+| POST | `/api/clean/apply` | Apply cleaning operations |
+| POST | `/api/sql/session` | Create a DuckDB query session |
+| POST | `/api/sql/query` | Generate and execute SQL from a question |
+| POST | `/api/sql/raw` | Execute validated read-only SQL |
+| GET | `/api/sql/history/{session_id}` | Read query history |
+| POST | `/api/rag/index` | Index dataset context |
+| POST | `/api/rag/chat` | Ask questions about indexed data |
+| POST | `/api/export/` | Export processed data |
+| GET | `/health` | Service health check |
+
+## Project Structure
+
+```text
 datagenie/
-├── backend/
-│   ├── main.py                  # FastAPI entry point
-│   ├── requirements.txt
-│   ├── .env                     # your secrets (never commit)
-│   ├── routers/
-│   │   ├── ingest.py            # file upload & schema detection
-│   │   ├── clean.py             # data cleaning endpoints
-│   │   ├── export.py            # CSV/JSON/XLSX export
-│   │   ├── sql.py               # NL-to-SQL + raw SQL engine
-│   │   └── rag.py               # RAG chat endpoints
-│   ├── services/
-│   │   ├── schema_service.py    # column profiling & type detection
-│   │   ├── cleaning_service.py  # cleaning engine (preview + apply)
-│   │   ├── sql_service.py       # NL-to-SQL pipeline (Gemini)
-│   │   └── sql_validator.py     # SQL safety validation
-│   ├── models/
-│   │   ├── schemas.py           # Pydantic models (ingest, clean, export)
-│   │   └── sql_schemas.py       # Pydantic models (SQL, RAG)
-│   └── utils/
-│       ├── session_store.py     # in-memory DataFrame store
-│       └── duck_session.py      # DuckDB session manager
-└── frontend/
-    ├── src/
-    └── package.json
+|-- backend/
+|   |-- main.py
+|   |-- routers/              # HTTP endpoints
+|   |-- services/             # Cleaning, SQL, schema, RAG, and export workflows
+|   |-- models/               # Pydantic API schemas
+|   |-- llm/                  # Gemini provider and response handling
+|   |-- utils/                # DuckDB sessions, storage, and vector store
+|   `-- requirements.txt
+|-- frontend/
+|   |-- src/App.jsx
+|   |-- src/components/       # Cleaning, SQL, chart, and RAG interfaces
+|   |-- src/services/         # API clients
+|   `-- package.json
+|-- render.yaml
+`-- sample_data.csv
 ```
 
----
+## About
 
-## ✨ Features
+DataGenie AI is a full-stack portfolio project focused on the practical gap between raw data and useful insight. It combines data engineering, backend API design, analytical SQL, LLM integration, retrieval, validation, and cloud deployment in one end-to-end product.
 
-### 📤 Data Ingestion
-- Upload CSV, JSON, or XLSX files
-- Automatic column profiling (types, nulls, outliers, duplicates)
-- Join suggestions across multiple uploaded files
+The project demonstrates an engineering approach centered on trustworthy results: inspect data before transformation, preview changes before applying them, constrain generated SQL, validate queries before execution, and keep secrets in deployment-managed environments.
 
-### 🧹 Data Cleaning
-- **Preview mode** — see exactly what will change before applying
-- Null handling: drop rows, fill mean/median/mode/custom, forward/backward fill
-- Outlier handling: IQR removal or percentile capping
-- Type conversion: numeric, datetime, category
-- Standardization: lowercase columns, trim whitespace, drop duplicates & constants
-- Quality score before and after (0–100)
+## License
 
-- Natural language → SQL using Gemini
-- Raw SQL editor for direct queries
-- DuckDB execution engine — fast, in-memory
-- Query history per session
-- Auto-suggested visualizations (bar, line, pie, scatter, histogram)
-
-### 🤖 RAG Chat
-- Index your cleaned dataset for semantic search
-- Ask questions in plain English and get data-grounded answers
-- Powered by Voyage AI embeddings
-
-### 📥 Export
-- Export cleaned data as CSV, JSON, or XLSX
-
----
-
-## 🔌 API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/api/ingest/upload` | Upload files |
-| GET | `/api/ingest/preview/{file_id}` | Preview data |
-| POST | `/api/clean/preview` | Dry-run cleaning |
-| POST | `/api/clean/apply` | Apply cleaning |
-| GET | `/api/clean/nulls/{file_id}` | Null report |
-| GET | `/api/clean/outliers/{file_id}` | Outlier report |
-| GET | `/api/clean/duplicates/{file_id}` | Duplicate report |
-| POST | `/api/export/` | Export dataset |
-| POST | `/api/sql/session` | Create SQL session |
-| POST | `/api/sql/query` | Natural language query |
-| POST | `/api/sql/raw` | Raw SQL query |
-| GET | `/api/sql/history/{session_id}` | Query history |
-| POST | `/api/rag/index` | Create RAG index |
-| POST | `/api/rag/chat` | Chat with data |
-| GET | `/health` | Health check |
-
-Full interactive docs: `http://localhost:8000/docs`
-
----
-
-## 🔑 Getting API Keys
-
-**Gemini:**
-1. Obtain a Gemini API key from your provider
-2. Add to `.env` as `GEMINI_API_KEY`
-
-**Voyage AI (optional, improves RAG quality):**
-1. Sign up at https://dash.voyageai.com
-2. Create an API key
-3. Add to `.env` as `VOYAGE_API_KEY`
-
----
-
-## ⚙️ Troubleshooting
-
-**`ModuleNotFoundError: No module named 'duckdb'`**
-```bash
-pip install duckdb
-```
-
-**`404 Not Found` on `/api/sql/session` or `/api/rag/index`**  
-Make sure all routers are registered in `main.py`:
-```python
-from routers import ingest, clean, export, sql, rag
-app.include_router(sql.router, prefix="/api/sql", tags=["SQL"])
-app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])
-```
-
-**`LLM provider error 401: Invalid API Key`**
-Regenerate your key at your LLM provider and update `.env`.
-
-**Frontend not starting with `npm start`**  
-This project uses Vite. Use `npm run dev` instead.
-
----
-
-## 📄 License
-
-MIT License — free to use, modify, and distribute.
+MIT License.
